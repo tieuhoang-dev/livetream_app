@@ -79,7 +79,6 @@ func VerifyUser(email, code string) error {
 		return errors.New("invalid_otp")
 	}
 
-	// Cập nhật trạng thái
 	user.IsVerified = true
 	user.Status = "active"
 	user.VerificationCodeHash = ""
@@ -184,4 +183,10 @@ func ResetPassword(email, code, newPassword string) error {
 		return errors.New("failed_to_update_user")
 	}
 	return nil
+}
+func UpdateUserAvatar(userID string, avatarURL string) error {
+	err := config.DB.Model(&models.User{}).
+		Where("id = ?", userID).
+		Update("avatar", avatarURL).Error
+	return err
 }

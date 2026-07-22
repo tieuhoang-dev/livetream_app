@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"livesteam_app/controller/services"
+	"livesteam_app/utils"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -143,9 +144,9 @@ func ResetPasswordRequest(c *gin.Context) {
 	})
 }
 func ResetPassword(c *gin.Context) {
-	var input struct{
-		Email string `json:"email" binding:"required,email"`
-		Code string `json:"code" binding:"required"`
+	var input struct {
+		Email       string `json:"email" binding:"required,email"`
+		Code        string `json:"code" binding:"required"`
 		NewPassword string `json:"new_password" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -161,9 +162,9 @@ func ResetPassword(c *gin.Context) {
 		} else if err.Error() == "otp_expired" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Verification code has expired"})
 		} else if err.Error() == "invalid_otp" {
-			c.JSON(http.StatusBadRequest,gin.H{"error":"Invalid OTP"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid OTP"})
 		} else if err.Error() == "failed_to_update_user" {
-			c.JSON(http.StatusBadRequest,gin.H{"error":"Failed to update User"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to update User"})
 		}
 		return
 	}
@@ -171,4 +172,20 @@ func ResetPassword(c *gin.Context) {
 		"status":  "success",
 		"message": "Password reset successfully",
 	})
+}
+func UploadAvatar(c *gin.Context) {
+	url, err := utils.UploadFile(c, "file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	userID := c.GetString("user_id")
+
+	err = services.UpdateUserAvatar(userID, url)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"url": url})
 }
