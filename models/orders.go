@@ -8,6 +8,7 @@ type Order struct {
 	LivestreamID *string   `gorm:"type:char(36)" json:"livestream_id"`
 	TotalAmount  float64   `gorm:"type:decimal(10,2);not null" json:"total_amount"`
 	Status       string    `gorm:"size:50;not null" json:"status"`
+	RefundReason string    `gorm:"size:255" json:"refund_reason"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 

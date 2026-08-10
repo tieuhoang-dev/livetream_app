@@ -9,6 +9,10 @@ import (
 	"path/filepath"
 	"time"
 
+	controllers "livesteam_app/controller/controller"
+
+	"livesteam_app/controller/services"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -23,6 +27,14 @@ func main() {
 	models.MigrateAll(config.DB)
 	config.ConnectMongoDB()
 	config.EnsureMongoIndexes()
+	controllers.SetDatabase(config.DB)
+	config.ConnectRedis()
+	services.StartChatWorkers(50)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	os.MkdirAll("./uploads", os.ModePerm)
 	r := gin.Default()
 	r.Use(cors.New(cors.Config{
@@ -38,7 +50,6 @@ func main() {
 	}))
 	r.Static("/uploads", filepath.Join(".", "uploads"))
 	routes.SetupUserRoutes(r)
-
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"

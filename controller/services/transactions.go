@@ -120,6 +120,64 @@ func RemoveProductFromLivestream(livestreamID, productID string) error {
 		return nil
 	})
 }
+func RefundOrder(userID string, orderID string, action string, refundReason string) error {
+	return config.DB.Transaction(func(tx *gorm.DB) error {
+		var order models.Order
+
+		if err := tx.Where("id = ? AND user_id = ?", orderID, userID).First(&order).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return errors.New("order_not_found")
+			}
+			return errors.New("database_error")
+		}
+
+		switch action {
+		case "refund":
+			if order.Status != "paid" {
+				return errors.New("order_not_paid")
+			}
+			order.Status = "refunded"
+			order.RefundReason = refundReason
+
+		case "cancel":
+			if order.Status == "cancelled" || order.Status == "refunded" {
+				return errors.New("order_already_processed")
+			}
+			order.Status = "cancelled"
+
+		default:
+			return errors.New("invalid_action")
+		}
+
+		if err := tx.Save(&order).Error; err != nil {
+			return errors.New("database_error")
+		}
+
+		var orderItems []models.OrderItem
+		if err := tx.Where("order_id = ?", orderID).Find(&orderItems).Error; err != nil {
+			return errors.New("database_error")
+		}
+
+		for _, item := range orderItems {
+			if order.LivestreamID != nil {
+				err := tx.Model(&models.LivestreamProduct{}).
+					Where("livestream_id = ? AND product_code = ?", *order.LivestreamID, item.ProductID).
+					UpdateColumn("stock_quantity", gorm.Expr("stock_quantity + ?", item.Quantity)).Error
+				if err != nil {
+					return errors.New("database_error")
+				}
+			} else {
+				err := tx.Model(&models.Product{}).
+					Where("id = ?", item.ProductID).
+					UpdateColumn("stock_quantity", gorm.Expr("stock_quantity + ?", item.Quantity)).Error
+				if err != nil {
+					return errors.New("database_error")
+				}
+			}
+		}
+		return nil
+	})
+}
 func PayOrder(orderID string, paymentMethod string) error {
 	return config.DB.Transaction(func(tx *gorm.DB) error {
 		var bill models.Payment

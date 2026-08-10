@@ -14,5 +14,4 @@ type LivestreamProduct struct {
 	Status          string  `gorm:"size:50;not null" json:"status"`
 
 	Livestream Livestream `gorm:"foreignKey:LivestreamID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;" json:"livestream"`
-	Product    Product    `gorm:"foreignKey:ProductID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;" json:"product"`
 }
