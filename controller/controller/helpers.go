@@ -25,9 +25,9 @@ func writeServiceError(c *gin.Context, err error) {
 		status = http.StatusNotFound
 	case "forbidden":
 		status = http.StatusForbidden
-	case "invalid_quantity", "invalid_price", "invalid_action", "invalid_otp", "otp_expired", "user_not_verified":
+	case "invalid_quantity", "invalid_price", "invalid_action", "invalid_otp", "otp_expired", "user_not_verified", "invalid_product", "empty_update", "invalid_pagination":
 		status = http.StatusBadRequest
-	case "insufficient_stock", "product_already_in_livestream", "product_has_active_orders", "livestream_not_active", "order_not_paid", "order_not_pending", "order_already_paid", "order_already_processed":
+	case "insufficient_stock", "product_already_in_livestream", "product_has_active_orders", "livestream_not_active", "order_not_paid", "order_not_pending", "order_already_paid", "order_already_processed", "product_in_use":
 		status = http.StatusConflict
 	case "email_delivery_failed":
 		status = http.StatusBadGateway

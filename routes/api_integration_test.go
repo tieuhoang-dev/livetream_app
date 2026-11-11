@@ -129,8 +129,10 @@ func TestConnectedAPI(t *testing.T) {
 	}
 	product := func(t *testing.T, owner string, quantity int) models.Product {
 		t.Helper()
-		p := models.Product{ID: uuid.NewString(), SellerID: owner, Name: "Test product", Price: 100, StockQuantity: quantity, ImageURL: "/test.png", Description: "Fixture"}
-		if err := db.Create(&p).Error; err != nil {
+		out := call(t, owner, "POST", "/api/products", gin.H{"name": "Test product", "price": 100, "stock_quantity": quantity, "image_url": "/uploads/test.png", "description": "Fixture"}, 201)
+		data, _ := json.Marshal(out)
+		var p models.Product
+		if err := json.Unmarshal(data, &p); err != nil {
 			t.Fatal(err)
 		}
 		return p
@@ -143,6 +145,8 @@ func TestConnectedAPI(t *testing.T) {
 
 	t.Run("protected routes require JWT", func(t *testing.T) {
 		for _, endpoint := range [][2]string{
+			{"POST", "/api/products"}, {"PATCH", "/api/products/" + uuid.NewString()},
+			{"DELETE", "/api/products/" + uuid.NewString()}, {"POST", "/api/products/" + uuid.NewString() + "/stock"},
 			{"PUT", "/api/users/me"}, {"POST", "/api/users/me/avatar"}, {"POST", "/api/orders"},
 			{"POST", "/api/orders/" + uuid.NewString() + "/pay"}, {"POST", "/api/orders/" + uuid.NewString() + "/cancel"},
 			{"POST", "/api/orders/" + uuid.NewString() + "/refund"},
@@ -150,6 +154,107 @@ func TestConnectedAPI(t *testing.T) {
 			{"DELETE", "/api/livestreams/" + uuid.NewString() + "/products/" + uuid.NewString()},
 		} {
 			call(t, "", endpoint[0], endpoint[1], nil, 401)
+		}
+	})
+
+	t.Run("product catalog CRUD, pagination and owner permissions", func(t *testing.T) {
+		p := product(t, seller.ID, 5)
+		second := product(t, seller.ID, 0)
+		foreign := product(t, buyer.ID, 1)
+		if p.SellerID != seller.ID || p.CreatedAt.IsZero() {
+			t.Fatal("product owner or creation timestamp missing")
+		}
+		out := call(t, "", "GET", "/api/products/"+p.ID, nil, 200)
+		for _, forbidden := range []string{"user", "password_hash", "verification_code_hash", "price_at_purchase"} {
+			if _, exists := out[forbidden]; exists {
+				t.Fatalf("product exposes %s", forbidden)
+			}
+		}
+		firstPage := call(t, "", "GET", "/api/products?seller_id="+seller.ID+"&page=1&page_size=1", nil, 200)
+		secondPage := call(t, "", "GET", "/api/products?seller_id="+seller.ID+"&page=2&page_size=1", nil, 200)
+		firstItems, secondItems := firstPage["data"].([]interface{}), secondPage["data"].([]interface{})
+		if firstPage["total"] != float64(2) || len(firstItems) != 1 || len(secondItems) != 1 || firstItems[0].(map[string]interface{})["id"] == secondItems[0].(map[string]interface{})["id"] {
+			t.Fatal("seller filtering or pagination failed")
+		}
+		empty := call(t, "", "GET", "/api/products?q="+uuid.NewString(), nil, 200)
+		if empty["total"] != float64(0) || len(empty["data"].([]interface{})) != 0 {
+			t.Fatal("empty catalog query must return an empty array")
+		}
+		for _, path := range []string{"/api/products?page=0", "/api/products?page_size=101", "/api/products?seller_id=invalid", "/api/products/not-a-uuid"} {
+			call(t, "", "GET", path, nil, 400)
+		}
+		call(t, "", "GET", "/api/products/"+uuid.NewString(), nil, 404)
+		call(t, buyer.ID, "PATCH", "/api/products/"+p.ID, gin.H{"name": "Hijacked"}, 403)
+		call(t, buyer.ID, "POST", "/api/products/"+p.ID+"/stock", gin.H{"quantity_delta": 1}, 403)
+		call(t, buyer.ID, "DELETE", "/api/products/"+p.ID, nil, 403)
+		call(t, seller.ID, "PATCH", "/api/products/"+uuid.NewString(), gin.H{"name": "Missing"}, 404)
+		call(t, seller.ID, "PATCH", "/api/products/"+p.ID, gin.H{}, 400)
+		call(t, seller.ID, "PATCH", "/api/products/"+p.ID, gin.H{"stock_quantity": 1000}, 400)
+		updated := call(t, seller.ID, "PATCH", "/api/products/"+p.ID, gin.H{"name": "  A 100%_product!  ", "price": 0, "description": "", "image_url": ""}, 200)
+		if updated["name"] != "A 100%_product!" || updated["price"] != float64(0) || updated["description"] != "" || updated["image_url"] != "" || updated["stock_quantity"] != float64(5) {
+			t.Fatal("partial update did not preserve explicit zero/empty fields or stock")
+		}
+		literal := call(t, "", "GET", "/api/products?seller_id="+seller.ID+"&q=100%25_product!", nil, 200)
+		if literal["total"] != float64(1) {
+			t.Fatal("literal search with SQL wildcard characters failed")
+		}
+		for _, payload := range []gin.H{
+			{"name": " ", "price": 10, "stock_quantity": 1},
+			{"name": "Product", "price": -1, "stock_quantity": 1},
+			{"name": "Product", "price": 1.001, "stock_quantity": 1},
+			{"name": "Product", "price": 100000000, "stock_quantity": 1},
+			{"name": "Product", "stock_quantity": 1},
+			{"name": "Product", "price": 1},
+			{"name": "Product", "price": 1, "stock_quantity": -1},
+			{"name": "Product", "price": 1, "stock_quantity": 1, "image_url": "javascript:alert(1)"},
+			{"name": "Product", "price": 1, "stock_quantity": 1, "seller_id": buyer.ID},
+		} {
+			call(t, seller.ID, "POST", "/api/products", payload, 400)
+		}
+		call(t, seller.ID, "DELETE", "/api/products/"+p.ID, nil, 204)
+		call(t, "", "GET", "/api/products/"+p.ID, nil, 404)
+		call(t, seller.ID, "DELETE", "/api/products/"+p.ID, nil, 404)
+		call(t, seller.ID, "DELETE", "/api/products/"+second.ID, nil, 204)
+		call(t, buyer.ID, "DELETE", "/api/products/"+foreign.ID, nil, 204)
+	})
+
+	t.Run("stock adjustments are atomic and cannot underflow or overflow", func(t *testing.T) {
+		p := product(t, seller.ID, 0)
+		codes := make(chan int, 8)
+		var wg sync.WaitGroup
+		for i := 0; i < 8; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				req, _ := http.NewRequest("POST", server.URL+"/api/products/"+p.ID+"/stock", strings.NewReader(`{"quantity_delta":1}`))
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Authorization", "Bearer "+tokens[seller.ID])
+				res, err := client.Do(req)
+				if err != nil {
+					codes <- 0
+					return
+				}
+				io.Copy(io.Discard, res.Body)
+				res.Body.Close()
+				codes <- res.StatusCode
+			}()
+		}
+		wg.Wait()
+		close(codes)
+		for code := range codes {
+			if code != 200 {
+				t.Fatalf("unexpected stock adjustment response %d", code)
+			}
+		}
+		if stock(t, p.ID) != 8 {
+			t.Fatal("concurrent stock increments were lost")
+		}
+		call(t, seller.ID, "POST", "/api/products/"+p.ID+"/stock", gin.H{"quantity_delta": -9}, 409)
+		call(t, seller.ID, "POST", "/api/products/"+p.ID+"/stock", gin.H{"quantity_delta": 0}, 400)
+		call(t, seller.ID, "POST", "/api/products/"+p.ID+"/stock", gin.H{"quantity_delta": int(^uint(0) >> 1)}, 400)
+		call(t, seller.ID, "POST", "/api/products/"+p.ID+"/stock", gin.H{"quantity_delta": -8}, 200)
+		if stock(t, p.ID) != 0 {
+			t.Fatal("failed adjustments changed stock")
 		}
 	})
 
@@ -202,6 +307,8 @@ func TestConnectedAPI(t *testing.T) {
 		call(t, buyer.ID, "POST", "/api/orders", gin.H{"product_id": p.ID, "quantity": 6, "payment_method": "manual"}, 409)
 		call(t, buyer.ID, "POST", "/api/orders", gin.H{"product_id": uuid.NewString(), "quantity": 1, "payment_method": "manual"}, 404)
 		id := order(t, p, nil, 2)
+		call(t, seller.ID, "DELETE", "/api/products/"+p.ID, nil, 409)
+		call(t, seller.ID, "PATCH", "/api/products/"+p.ID, gin.H{"price": 120}, 200)
 		if stock(t, p.ID) != 3 {
 			t.Fatal("stock was not deducted")
 		}
@@ -218,6 +325,7 @@ func TestConnectedAPI(t *testing.T) {
 		if stock(t, p.ID) != 5 || payment.Status != "refunded" || payment.Amount != 200 {
 			t.Fatal("refund did not restore stock once and synchronize payment")
 		}
+		call(t, seller.ID, "DELETE", "/api/products/"+p.ID, nil, 409)
 		cancelID := order(t, p, nil, 1)
 		call(t, buyer.ID, "POST", "/api/orders/"+cancelID+"/cancel", nil, 200)
 		call(t, buyer.ID, "POST", "/api/orders/"+cancelID+"/cancel", nil, 409)
@@ -308,10 +416,15 @@ func TestConnectedAPI(t *testing.T) {
 		call(t, buyer.ID, "POST", path, payload, 403)
 		call(t, seller.ID, "POST", path, gin.H{"product_id": foreign.ID, "discount_price": 80, "stock_quantity": 1}, 403)
 		call(t, seller.ID, "POST", path, payload, 201)
+		call(t, seller.ID, "DELETE", "/api/products/"+p.ID, nil, 409)
+		call(t, seller.ID, "PATCH", "/api/products/"+p.ID, gin.H{"price": 110, "name": "Updated catalog name"}, 200)
 		var attached models.LivestreamProduct
 		db.First(&attached, "livestream_id = ? AND product_code = ?", liveID, p.ID)
 		if attached.ProductName != p.Name || attached.ProductImage != p.ImageURL || attached.Description != p.Description || !attached.IsPinned {
 			t.Fatal("live product metadata was not copied")
+		}
+		if attached.DiscountPrice != 80 || attached.PriceAtPurchase != 100 {
+			t.Fatal("editing catalog product changed live price snapshot")
 		}
 		call(t, seller.ID, "POST", path, payload, 409)
 		if stock(t, p.ID) != 10 {
