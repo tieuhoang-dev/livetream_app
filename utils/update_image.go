@@ -30,5 +30,5 @@ func UploadFile(c *gin.Context, fieldName string) (string, error) {
 		return "", fmt.Errorf("failed to save file")
 	}
 
-	return "/static/" + filename, nil
+	return "/uploads/" + filename, nil
 }

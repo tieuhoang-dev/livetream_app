@@ -671,8 +671,8 @@ func HandleWS(ctx *gin.Context) {
 			liveStream.Status =
 				"end"
 
-			liveStream.EndedAt =
-				time.Now()
+			endedAt := time.Now()
+			liveStream.EndedAt = &endedAt
 
 			if err := DB.Save(
 				&liveStream,
