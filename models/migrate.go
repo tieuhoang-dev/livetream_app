@@ -5,6 +5,7 @@ import (
 
 	"gorm.io/gorm"
 )
+
 func MigrateAll(db *gorm.DB) {
 	err := db.AutoMigrate(
 		&User{},
@@ -13,13 +14,14 @@ func MigrateAll(db *gorm.DB) {
 		&Product{},
 		&OrderItem{},
 		&Order{},
+		&Payment{},
 		&LivestreamProduct{},
 		&Livestream{},
 	)
-	
+
 	if err != nil {
 		log.Fatalf("MySQL AutoMigrate failed: %v", err)
 	}
-	
+
 	log.Println("MySQL AutoMigrate completed successfully")
 }

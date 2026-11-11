@@ -7,12 +7,16 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"time"
 )
 
 func SendVerificationEmail(to string, code string) error {
 
 	apiKey := os.Getenv("BREVO_API_KEY")
 	from := os.Getenv("FROM_EMAIL")
+	if apiKey == "" || from == "" {
+		return fmt.Errorf("email provider is not configured")
+	}
 
 	url := "https://api.brevo.com/v3/smtp/email"
 
@@ -40,7 +44,7 @@ func SendVerificationEmail(to string, code string) error {
 	req.Header.Set("api-key", apiKey)
 	req.Header.Set("content-type", "application/json")
 
-	client := &http.Client{}
+	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err

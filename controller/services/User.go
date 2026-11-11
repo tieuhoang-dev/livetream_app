@@ -71,7 +71,10 @@ func VerifyUser(email, code string) error {
 		return err
 	}
 
-	if user.VerificationExpiresAt != nil && time.Now().After(*user.VerificationExpiresAt) {
+	if user.IsVerified {
+		return errors.New("user_already_verified")
+	}
+	if user.VerificationExpiresAt == nil || time.Now().After(*user.VerificationExpiresAt) {
 		return errors.New("otp_expired")
 	}
 
@@ -130,10 +133,13 @@ func ResetPasswordRequest(email string) error {
 	var user models.User
 	err := config.DB.Where("email = ?", email).First(&user).Error
 	if err != nil {
-		if err == gorm.ErrCheckConstraintViolated {
+		if err == gorm.ErrRecordNotFound {
 			return errors.New("user_not_found")
 		}
 		return errors.New("database_error")
+	}
+	if !user.IsVerified {
+		return errors.New("user_not_verified")
 	}
 	otp, err := generateOTP()
 	if err != nil {
@@ -144,14 +150,17 @@ func ResetPasswordRequest(email string) error {
 		return err
 	}
 	otpExpiresAt := time.Now().Add(time.Minute * 15)
-	user.VerificationCodeHash = string(otpHash)
-	user.VerificationExpiresAt = &otpExpiresAt
-	if err := config.DB.Save(&user).Error; err != nil {
+	user.PasswordResetCodeHash = string(otpHash)
+	user.PasswordResetExpiresAt = &otpExpiresAt
+	if err := config.DB.Model(&user).Updates(map[string]interface{}{
+		"password_reset_code_hash":  user.PasswordResetCodeHash,
+		"password_reset_expires_at": user.PasswordResetExpiresAt,
+	}).Error; err != nil {
 		return errors.New("failed_to_update_user")
 	}
-	go func() {
-		utils.SendVerificationEmail(email, otp)
-	}()
+	if err := utils.SendVerificationEmail(email, otp); err != nil {
+		return errors.New("email_delivery_failed")
+	}
 	return nil
 }
 func ResetPassword(email, code, newPassword string) error {
@@ -162,25 +171,32 @@ func ResetPassword(email, code, newPassword string) error {
 		}
 		return errors.New("database_error")
 	}
-	if user.IsVerified {
-		return errors.New("user_already_verified")
+	if !user.IsVerified {
+		return errors.New("user_not_verified")
 	}
-	if user.VerificationExpiresAt != nil && time.Now().After(*user.VerificationExpiresAt) {
+	if user.PasswordResetExpiresAt == nil || time.Now().After(*user.PasswordResetExpiresAt) {
 		return errors.New("otp_expired")
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(user.VerificationCodeHash), []byte(code)); err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordResetCodeHash), []byte(code)); err != nil {
 		return errors.New("invalid_otp")
 	}
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
-	user.PasswordHash = string(hashedPassword)
-	user.VerificationCodeHash = ""
-	user.VerificationExpiresAt = nil
-	if err := config.DB.Save(&user).Error; err != nil {
+	result := config.DB.Model(&models.User{}).
+		Where("id = ? AND password_reset_code_hash = ? AND password_reset_expires_at > ?", user.ID, user.PasswordResetCodeHash, time.Now()).
+		Updates(map[string]interface{}{
+			"password_hash":             string(hashedPassword),
+			"password_reset_code_hash":  "",
+			"password_reset_expires_at": nil,
+		})
+	if result.Error != nil {
 		return errors.New("failed_to_update_user")
+	}
+	if result.RowsAffected != 1 {
+		return errors.New("invalid_otp")
 	}
 	return nil
 }

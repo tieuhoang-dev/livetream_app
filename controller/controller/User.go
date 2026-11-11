@@ -4,6 +4,8 @@ import (
 	"livesteam_app/controller/services"
 	"livesteam_app/utils"
 	"net/http"
+	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -52,7 +54,7 @@ func VerifyUser(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "User already verified"})
 		} else if err.Error() == "otp_expired" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Verification code has expired"})
-		} else if err.Error() == "invalid_verification_code" {
+		} else if err.Error() == "invalid_otp" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid verification code"})
 		} else {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
@@ -95,6 +97,10 @@ func Login(c *gin.Context) {
 	return
 }
 func UpdateProfile(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		return
+	}
 	var input struct {
 		Fullname string `json:"fullname" binding:"required"`
 		Avatar   string `json:"avatar" binding:"required"`
@@ -103,7 +109,7 @@ func UpdateProfile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	err := services.SetupProfile(c.GetString("userID"), input.Fullname, input.Avatar)
+	err := services.SetupProfile(userID, input.Fullname, input.Avatar)
 	if err != nil {
 		if err.Error() == "user_not_found" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "User not found"})
@@ -129,13 +135,7 @@ func ResetPasswordRequest(c *gin.Context) {
 	}
 	err := services.ResetPasswordRequest(input.Email)
 	if err != nil {
-		if err.Error() == "user_not_found" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "User not found"})
-		} else if err.Error() == "failed_to_generate_otp" {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate OTP"})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
-		}
+		writeServiceError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -147,7 +147,7 @@ func ResetPassword(c *gin.Context) {
 	var input struct {
 		Email       string `json:"email" binding:"required,email"`
 		Code        string `json:"code" binding:"required"`
-		NewPassword string `json:"new_password" binding:"required"`
+		NewPassword string `json:"new_password" binding:"required,max=72"`
 	}
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -155,17 +155,7 @@ func ResetPassword(c *gin.Context) {
 	}
 	err := services.ResetPassword(input.Email, input.Code, input.NewPassword)
 	if err != nil {
-		if err.Error() == "user_not_found" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "User not found"})
-		} else if err.Error() == "user_already_verified" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "User already verified"})
-		} else if err.Error() == "otp_expired" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Verification code has expired"})
-		} else if err.Error() == "invalid_otp" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid OTP"})
-		} else if err.Error() == "failed_to_update_user" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to update User"})
-		}
+		writeServiceError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -174,13 +164,27 @@ func ResetPassword(c *gin.Context) {
 	})
 }
 func UploadAvatar(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "An image file up to 10 MB is required"})
+		return
+	}
+	switch strings.ToLower(filepath.Ext(file.Filename)) {
+	case ".jpg", ".jpeg", ".png", ".webp":
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid avatar image format"})
+		return
+	}
 	url, err := utils.UploadFile(c, "file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
-	userID := c.GetString("user_id")
 
 	err = services.UpdateUserAvatar(userID, url)
 	if err != nil {
