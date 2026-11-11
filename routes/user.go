@@ -20,6 +20,7 @@ func SetupUserRoutes(r *gin.Engine) {
 	profileGroup := userGroup.Group("/me", middlewares.AuthMiddleware())
 	profileGroup.PUT("", controllers.UpdateProfile)
 	profileGroup.POST("/avatar", controllers.UploadAvatar)
+	SetupProductRoutes(r)
 
 	orderGroup := r.Group("/api/orders", middlewares.AuthMiddleware())
 	orderGroup.POST("", controllers.OrderProduct)
