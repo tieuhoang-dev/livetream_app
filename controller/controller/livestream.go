@@ -718,8 +718,9 @@ func HandleWS(ctx *gin.Context) {
 
 			if err := DB.First(
 				&liveStream,
-				"id = ?",
+				"id = ? AND status = ?",
 				msg.Content,
+				"start",
 			).Error; err != nil {
 
 				log.Printf(
@@ -732,7 +733,7 @@ func HandleWS(ctx *gin.Context) {
 					gin.H{
 						"type": "join_live_error",
 
-						"error": "Không tìm thấy livestream",
+						"error": "Livestream không tồn tại hoặc đã kết thúc",
 					},
 				)
 

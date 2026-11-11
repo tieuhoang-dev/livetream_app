@@ -402,6 +402,21 @@ func TestConnectedAPI(t *testing.T) {
 			t.Fatalf("create_live: %v", response)
 		}
 		liveID := response["id"].(string)
+		assertJoin := func(id, want string) {
+			t.Helper()
+			if err := ws.WriteJSON(gin.H{"type": "join_live", "content": id}); err != nil {
+				t.Fatal(err)
+			}
+			var reply map[string]interface{}
+			if err := ws.ReadJSON(&reply); err != nil {
+				t.Fatal(err)
+			}
+			if reply["type"] != want {
+				t.Fatalf("join_live: want %s, got %v", want, reply)
+			}
+		}
+		assertJoin(liveID, "join_live_success")
+		assertJoin(uuid.NewString(), "join_live_error")
 		var live models.Livestream
 		db.First(&live, "id = ?", liveID)
 		if live.EndedAt != nil {
@@ -450,6 +465,7 @@ func TestConnectedAPI(t *testing.T) {
 		if err := ws.ReadJSON(&response); err != nil || response["type"] != "end_live_success" {
 			t.Fatalf("end_live: %v %v", response, err)
 		}
+		assertJoin(liveID, "join_live_error")
 		call(t, seller.ID, "POST", path, payload, 409)
 		call(t, buyer.ID, "POST", "/api/orders", gin.H{"product_id": p.ID, "quantity": 1, "livestream_id": liveID, "payment_method": "manual"}, 409)
 	})

@@ -146,6 +146,8 @@ quan, để các đơn đó vẫn có thể hủy/hoàn đúng kho.
 
 Tạo/kết thúc live vẫn qua WebSocket với `type: "create_live"` (content là tiêu
 đề) và `type: "end_live"` (content là UUID live). Live mới lưu `ended_at = NULL`.
+`type: "join_live"` chỉ cho tham gia live có trạng thái `start`; live đã kết
+thúc hoặc không tồn tại trả `join_live_error`.
 
 ## Lỗi
 
