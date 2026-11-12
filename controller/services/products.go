@@ -210,7 +210,7 @@ func DeleteProduct(userID, productID string) error {
 		// Keep products referenced by live stock allocations or historical order
 		// items, so removing a product cannot break restocking or order history.
 		var references int64
-		if err := tx.Model(&models.LivestreamProduct{}).Where("product_code = ?", productID).Count(&references).Error; err != nil {
+		if err := tx.Model(&models.LivestreamProduct{}).Where("product_id = ?", productID).Count(&references).Error; err != nil {
 			return err
 		}
 		if references > 0 {
