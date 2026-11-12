@@ -30,6 +30,14 @@ hiển thị trực tiếp trong Body để người dùng nhập OTP rồi Send
 file collection giao vẫn để trống và không tạo OTP hay đọc OTP tự động từ DB.
 Script chặn mã trống/không đủ 6 số, không ghi đè mã người dùng đã nhập.
 
+Register seller/buyer kết thúc lượt Runner khi trả 200 bằng
+`pm.execution.setNextRequest(null)`. Đã xác minh setup theo 3 lượt: 1 request
+(Register seller), 3 request (Verify seller, Login seller, Register buyer),
+2 request (Verify buyer, Login buyer). Runner không gửi Verify/Login khi dừng
+đợi OTP. Request gửi OTP reset cũng có lệnh dừng; hành vi control-flow được
+kiểm tra riêng bằng script, còn gửi email reset thành công vẫn chưa test do
+thiếu Brevo key.
+
 Toàn bộ 105 request đã được kiểm tra cú pháp JavaScript. JSON được Newman đọc
 và thực thi; những tên biến response tránh các global legacy của Postman.
 

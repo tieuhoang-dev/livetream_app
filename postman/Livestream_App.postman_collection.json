@@ -3,15 +3,15 @@
     "_postman_id": "f33c42c4-5df9-4daf-aae4-301ab7c9e819",
     "name": "Livestream App - API regression",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Theo main 7dc3dd0. Đọc README trước khi chạy. Chỉ chọn folder 02 - HTTP tu dong cho Collection Runner; folder OTP/WebSocket/file cần thao tác theo hướng dẫn. Token và ID tự lưu trong Environment. Không chứa tài khoản, token hoặc API key thật. Luồng chính: Register → dừng để nhập OTP email vào Body.code của Verify → Send Verify thành công → Login. OTP được nhập trực tiếp, không bị script ghi đè; Collection Runner không có popup nhập OTP."
+    "description": "Theo main 7dc3dd0. Luồng chính: Register → dừng nhập OTP trong Body.code → Verify thành công → Login. Runner kết thúc lượt sau mỗi Register và yêu cầu OTP reset thành công. Sau khi nhập OTP và Save, bắt đầu lượt Run mới từ Verify, bỏ chọn Register đã chạy. Không có popup hoặc tự Resume trong cùng lượt. Folder 02 chạy tự động liền mạch trên hai tài khoản đã verified; các folder file/live cần điều kiện riêng. Token/ID tự lưu trong Environment; không chứa credential thật."
   },
   "item": [
     {
       "name": "01 - Setup tai khoan (THU CONG)",
-      "description": "Luồng chính cho từng tài khoản: Đăng ký → nhập OTP email → Verify thành công → Login. Chạy từng request theo thứ tự. Nếu đã có 2 tài khoản verified thì bỏ qua folder này. Case đăng nhập trước verify bị chặn nằm riêng ở folder 07.",
+      "description": "Register thành công sẽ kết thúc lượt Runner để chờ bạn nhập OTP. Nhập code trong Body Verify, Save, rồi bắt đầu lượt Run mới từ Verify (bỏ chọn Register đã chạy). Có thể gửi từng request bằng Send. Luồng chính: Register → Verify → Login. Đây không phải pause/resume cùng một lượt và không có popup OTP.",
       "item": [
         {
-          "name": "AUTH-001 | Đăng ký seller",
+          "name": "AUTH-001 | Đăng ký seller (dừng Runner chờ OTP)",
           "request": {
             "method": "POST",
             "auth": {
@@ -54,7 +54,8 @@
                 "exec": [
                   "pm.test(\"AUTH-001: HTTP 200\", function () { pm.response.to.have.status(200); });",
                   "const __livestreamBody = pm.response.json();",
-                  "pm.test(\"status \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"status\"]).to.eql(\"success\"));"
+                  "pm.test(\"status \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"status\"]).to.eql(\"success\"));",
+                  "if (pm.response.code === 200) { console.info(\"Lượt chạy đã dừng để nhập OTP. Mở Body của Verify, nhập mã email và Save. Bắt đầu lượt Run mới từ Verify, bỏ chọn Register đã chạy; hoặc gửi Verify bằng nút Send.\"); pm.execution.setNextRequest(null); }"
                 ]
               }
             }
@@ -92,7 +93,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "for (const key of [\"seller_email\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
-                  "const otpInput = JSON.parse(pm.variables.replaceIn(pm.request.body.raw)); if (typeof otpInput.code !== \"string\" || !/^\\d{6}$/.test(otpInput.code)) throw new Error(\"Nhập mã OTP 6 số nhận qua email vào Body > raw > JSON, trường code, rồi bấm Send. Chạy từng request, không Run folder setup.\");"
+                  "const otpInput = JSON.parse(pm.variables.replaceIn(pm.request.body.raw)); if (typeof otpInput.code !== \"string\" || !/^\\d{6}$/.test(otpInput.code)) throw new Error(\"Nhập mã OTP 6 số nhận qua email vào Body > raw > JSON, trường code. Save rồi Run từ Verify, hoặc bấm Send từng request.\");"
                 ]
               }
             },
@@ -164,7 +165,7 @@
           ]
         },
         {
-          "name": "AUTH-004 | Đăng ký buyer",
+          "name": "AUTH-004 | Đăng ký buyer (dừng Runner chờ OTP)",
           "request": {
             "method": "POST",
             "auth": {
@@ -207,7 +208,8 @@
                 "exec": [
                   "pm.test(\"AUTH-004: HTTP 200\", function () { pm.response.to.have.status(200); });",
                   "const __livestreamBody = pm.response.json();",
-                  "pm.test(\"status \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"status\"]).to.eql(\"success\"));"
+                  "pm.test(\"status \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"status\"]).to.eql(\"success\"));",
+                  "if (pm.response.code === 200) { console.info(\"Lượt chạy đã dừng để nhập OTP. Mở Body của Verify, nhập mã email và Save. Bắt đầu lượt Run mới từ Verify, bỏ chọn Register đã chạy; hoặc gửi Verify bằng nút Send.\"); pm.execution.setNextRequest(null); }"
                 ]
               }
             }
@@ -245,7 +247,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "for (const key of [\"buyer_email\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
-                  "const otpInput = JSON.parse(pm.variables.replaceIn(pm.request.body.raw)); if (typeof otpInput.code !== \"string\" || !/^\\d{6}$/.test(otpInput.code)) throw new Error(\"Nhập mã OTP 6 số nhận qua email vào Body > raw > JSON, trường code, rồi bấm Send. Chạy từng request, không Run folder setup.\");"
+                  "const otpInput = JSON.parse(pm.variables.replaceIn(pm.request.body.raw)); if (typeof otpInput.code !== \"string\" || !/^\\d{6}$/.test(otpInput.code)) throw new Error(\"Nhập mã OTP 6 số nhận qua email vào Body > raw > JSON, trường code. Save rồi Run từ Verify, hoặc bấm Send từng request.\");"
                 ]
               }
             },
@@ -4513,7 +4515,7 @@
       "description": "Chạy từng request trên tài khoản test buyer. Sau khi nhận OTP email, mở Body của RESET-002 và nhập vào code đang để trống. Đặt buyer_new_password trong Environment. Request thành công cập nhật buyer_password. Không Run nguyên folder khi chưa chuẩn bị OTP.",
       "item": [
         {
-          "name": "RESET-001 | Yêu cầu OTP reset (Brevo đã cấu hình)",
+          "name": "RESET-001 | Yêu cầu OTP reset (dừng Runner chờ OTP)",
           "request": {
             "method": "POST",
             "auth": {
@@ -4526,7 +4528,7 @@
               }
             ],
             "url": "{{base_url}}/api/users/password/reset-request",
-            "description": "Yêu cầu OTP reset (Brevo đã cấu hình)",
+            "description": "Yêu cầu OTP reset (dừng Runner chờ OTP)",
             "body": {
               "mode": "raw",
               "raw": "{{email_body}}",
@@ -4554,7 +4556,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"RESET-001: HTTP 200\", function () { pm.response.to.have.status(200); });",
-                  "const __livestreamBody = pm.response.json();"
+                  "const __livestreamBody = pm.response.json();",
+                  "if (pm.response.code === 200) { console.info(\"Lượt chạy đã dừng để nhập OTP. Mở Body của Verify, nhập mã email và Save. Bắt đầu lượt Run mới từ Verify, bỏ chọn Register đã chạy; hoặc gửi Verify bằng nút Send.\"); pm.execution.setNextRequest(null); }"
                 ]
               }
             }

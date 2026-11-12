@@ -58,10 +58,24 @@ Chạy **từng request** trong folder `01 - Setup tai khoan (THU CONG)`:
 5. Làm tương tự cho buyer: `AUTH-004` đăng ký → mở Body của `AUTH-005`, nhập
    OTP vào `code` và Send Verify → `AUTH-006` Login.
 
-**Postman Collection Runner không có popup để nhập OTP hoặc dừng chờ bạn đọc
-email.** Folder 01 phải chạy từng request bằng nút Send. Nếu `code` còn trống,
-pre-request báo rõ cần nhập mã trong Body. Chỉ gửi Login sau khi Verify trả
-200. Không cần đặt biến Environment cho OTP xác thực.
+### Dùng Runner và dừng để nhập OTP
+
+Collection đã thêm `pm.execution.setNextRequest(null)` sau mỗi Register thành
+công. Lệnh này **kết thúc lượt chạy hiện tại**, không phải pause/resume và
+không hiện popup OTP. Bạn có thể dùng nút Send như trên hoặc chạy theo 3 lượt:
+
+1. Run folder 01, bật **Keep variable values**. Runner chạy `AUTH-001` rồi dừng
+   thành công, chưa gửi Verify hay Login.
+2. Nhập OTP seller vào Body `AUTH-002`, bấm **Save / Ctrl+S**. Mở lượt Run mới,
+   bỏ chọn `AUTH-001`, chọn các request từ `AUTH-002` trở đi. Runner chạy Verify
+   seller → Login seller → Register buyer (`AUTH-004`) rồi dừng để nhập OTP buyer.
+3. Nhập OTP buyer vào Body `AUTH-005`, Save. Mở lượt Run mới chỉ chọn
+   `AUTH-005` và `AUTH-006`. Verify và Login buyer thành công thì chuyển sang
+   folder 02 để chạy các API nghiệp vụ.
+
+Không bấm Run lại từ đầu vì Register đã chạy với email đó sẽ trả 409. OTP
+phải được lấy từ email thật; script không tạo mã hay đọc hộp thư. Nếu `code`
+còn trống, pre-request báo rõ cần nhập mã. Không cần biến Environment cho OTP.
 
 Folder 01 chỉ có luồng thành công; cả 6 request đều mong đợi HTTP 200. Case
 đăng nhập khi chưa verify bị chặn được tách riêng ở folder 07, dùng tài khoản
@@ -141,10 +155,13 @@ Không có API HTTP tạo live, nên không gọi `POST /api/livestreams`.
 Folder `06 - Reset mat khau (THU CONG)` phải chạy từng bước, trên tài khoản test
 buyer. Các case trong folder có điều kiện khác nhau, không Run cả folder.
 
-1. `RESET-001`: khi Brevo đã cấu hình, yêu cầu OTP, mong đợi 200.
+1. `RESET-001`: khi Brevo đã cấu hình, yêu cầu OTP, mong đợi 200. Nếu dùng
+   Runner, lượt chạy sẽ kết thúc ngay sau request này để bạn nhập OTP.
 2. Đặt `buyer_new_password` khác mật khẩu cũ trong Environment. Mở
    `RESET-002` → Body → raw → JSON, nhập OTP từ email vào trường `code` đang
    trống, rồi Send. Không cần nhập biến Environment cho OTP reset.
+   Nếu dùng Runner, Save Body và mở lượt mới từ `RESET-002`, bỏ chọn
+   `RESET-001`; không chạy case `RESET-007` dành cho môi trường thiếu Brevo.
 3. `RESET-002`: xác nhận reset, mong đợi 200. Script tự lưu mật khẩu cũ vào
    `buyer_previous_password`, rồi cập nhật `buyer_password` trong Environment.
 4. `RESET-003`: login mật khẩu cũ trả 400; `RESET-004`: mật khẩu mới trả 200,
