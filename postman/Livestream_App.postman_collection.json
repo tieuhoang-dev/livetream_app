@@ -3,7 +3,7 @@
     "_postman_id": "f33c42c4-5df9-4daf-aae4-301ab7c9e819",
     "name": "Livestream App - API regression",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Theo main 7dc3dd0. Đọc README trước khi chạy. Chỉ chọn folder 02 - HTTP tu dong cho Collection Runner; folder OTP/WebSocket/file cần thao tác theo hướng dẫn. Token và ID tự lưu trong Environment. Không chứa tài khoản, token hoặc API key thật. Luồng chính folder 01: Register → Verify thành công → Login, cho từng tài khoản. Case login trước Verify phải bị từ chối đã tách riêng vào folder 07 và dùng tài khoản khác."
+    "description": "Theo main 7dc3dd0. Đọc README trước khi chạy. Chỉ chọn folder 02 - HTTP tu dong cho Collection Runner; folder OTP/WebSocket/file cần thao tác theo hướng dẫn. Token và ID tự lưu trong Environment. Không chứa tài khoản, token hoặc API key thật. Luồng chính: Register → dừng để nhập OTP email vào Body.code của Verify → Send Verify thành công → Login. OTP được nhập trực tiếp, không bị script ghi đè; Collection Runner không có popup nhập OTP."
   },
   "item": [
     {
@@ -61,7 +61,7 @@
           ]
         },
         {
-          "name": "AUTH-002 | Xác thực OTP seller",
+          "name": "AUTH-002 | Nhập OTP trong Body rồi Verify seller",
           "request": {
             "method": "POST",
             "auth": {
@@ -74,10 +74,10 @@
               }
             ],
             "url": "{{base_url}}/api/users/verify",
-            "description": "Xác thực OTP seller",
+            "description": "Sau Register, dừng lại mở email. Mở Body → raw → JSON của request này, nhập OTP 6 số vào code đang để trống và bấm Send. Script không tạo hay ghi đè OTP. Chỉ khi HTTP 200 mới chuyển sang Login. Collection Runner không có popup nhập OTP.",
             "body": {
               "mode": "raw",
-              "raw": "{{verify_body}}",
+              "raw": "{\n  \"email\": \"{{seller_email}}\",\n  \"code\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -91,8 +91,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "for (const key of [\"seller_email\", \"seller_verification_code\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
-                  "pm.variables.set(\"verify_body\", JSON.stringify({email: pm.environment.get(\"seller_email\"), code: pm.environment.get(\"seller_verification_code\")}));"
+                  "for (const key of [\"seller_email\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "const otpInput = JSON.parse(pm.variables.replaceIn(pm.request.body.raw)); if (typeof otpInput.code !== \"string\" || !/^\\d{6}$/.test(otpInput.code)) throw new Error(\"Nhập mã OTP 6 số nhận qua email vào Body > raw > JSON, trường code, rồi bấm Send. Chạy từng request, không Run folder setup.\");"
                 ]
               }
             },
@@ -214,7 +214,7 @@
           ]
         },
         {
-          "name": "AUTH-005 | Xác thực OTP buyer",
+          "name": "AUTH-005 | Nhập OTP trong Body rồi Verify buyer",
           "request": {
             "method": "POST",
             "auth": {
@@ -227,10 +227,10 @@
               }
             ],
             "url": "{{base_url}}/api/users/verify",
-            "description": "Xác thực OTP buyer",
+            "description": "Sau Register, dừng lại mở email. Mở Body → raw → JSON của request này, nhập OTP 6 số vào code đang để trống và bấm Send. Script không tạo hay ghi đè OTP. Chỉ khi HTTP 200 mới chuyển sang Login. Collection Runner không có popup nhập OTP.",
             "body": {
               "mode": "raw",
-              "raw": "{{verify_body}}",
+              "raw": "{\n  \"email\": \"{{buyer_email}}\",\n  \"code\": \"\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -244,8 +244,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "for (const key of [\"buyer_email\", \"buyer_verification_code\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
-                  "pm.variables.set(\"verify_body\", JSON.stringify({email: pm.environment.get(\"buyer_email\"), code: pm.environment.get(\"buyer_verification_code\")}));"
+                  "for (const key of [\"buyer_email\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "const otpInput = JSON.parse(pm.variables.replaceIn(pm.request.body.raw)); if (typeof otpInput.code !== \"string\" || !/^\\d{6}$/.test(otpInput.code)) throw new Error(\"Nhập mã OTP 6 số nhận qua email vào Body > raw > JSON, trường code, rồi bấm Send. Chạy từng request, không Run folder setup.\");"
                 ]
               }
             },
@@ -4510,7 +4510,7 @@
     },
     {
       "name": "06 - Reset mat khau (THU CONG)",
-      "description": "Chạy từng request trên tài khoản test buyer. Cần OTP thật từ email; nhập buyer_reset_code và buyer_new_password. Request thành công cập nhật buyer_password trong Environment. Không Run nguyên folder khi chưa chuẩn bị OTP.",
+      "description": "Chạy từng request trên tài khoản test buyer. Sau khi nhận OTP email, mở Body của RESET-002 và nhập vào code đang để trống. Đặt buyer_new_password trong Environment. Request thành công cập nhật buyer_password. Không Run nguyên folder khi chưa chuẩn bị OTP.",
       "item": [
         {
           "name": "RESET-001 | Yêu cầu OTP reset (Brevo đã cấu hình)",
@@ -4561,7 +4561,7 @@
           ]
         },
         {
-          "name": "RESET-002 | Xác nhận OTP reset và đổi mật khẩu",
+          "name": "RESET-002 | Nhập OTP trong Body để xác nhận reset",
           "request": {
             "method": "POST",
             "auth": {
@@ -4574,10 +4574,10 @@
               }
             ],
             "url": "{{base_url}}/api/users/password/reset",
-            "description": "Xác nhận OTP reset và đổi mật khẩu",
+            "description": "Nhập trực tiếp OTP email vào trường code trong Body. Đặt buyer_new_password trong Environment. Script giữ nguyên OTP bạn nhập; sau thành công mới cập nhật mật khẩu và lưu mã đã dùng để kiểm tra chống dùng lại.",
             "body": {
               "mode": "raw",
-              "raw": "{{reset_body}}",
+              "raw": "{\n  \"email\": \"{{buyer_email}}\",\n  \"code\": \"\",\n  \"new_password\": \"{{buyer_new_password}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4591,8 +4591,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "for (const key of [\"buyer_email\", \"buyer_reset_code\", \"buyer_new_password\", \"buyer_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
-                  "pm.variables.set(\"reset_body\",JSON.stringify({email:pm.environment.get(\"buyer_email\"),code:pm.environment.get(\"buyer_reset_code\"),new_password:pm.environment.get(\"buyer_new_password\")}));"
+                  "for (const key of [\"buyer_email\", \"buyer_new_password\", \"buyer_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "const resetInput = JSON.parse(pm.request.body.raw); if (typeof resetInput.code !== \"string\" || !/^\\d{6}$/.test(resetInput.code)) throw new Error(\"Nhập OTP reset 6 số vào Body > raw > JSON, trường code, rồi bấm Send.\"); resetInput.email=pm.environment.get(\"buyer_email\"); resetInput.new_password=pm.environment.get(\"buyer_new_password\"); pm.request.body.update(JSON.stringify(resetInput));"
                 ]
               }
             },
@@ -4603,7 +4603,7 @@
                 "exec": [
                   "pm.test(\"RESET-002: HTTP 200\", function () { pm.response.to.have.status(200); });",
                   "const __livestreamBody = pm.response.json();",
-                  "if(pm.response.code===200){pm.environment.set(\"buyer_previous_password\",pm.environment.get(\"buyer_password\"));pm.environment.set(\"buyer_password\",pm.environment.get(\"buyer_new_password\"));}"
+                  "if(pm.response.code===200){const submitted=JSON.parse(pm.request.body.raw);pm.environment.set(\"buyer_used_reset_code\",submitted.code);pm.environment.set(\"buyer_previous_password\",pm.environment.get(\"buyer_password\"));pm.environment.set(\"buyer_password\",submitted.new_password);}"
                 ]
               }
             }
@@ -4742,8 +4742,8 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "for (const key of [\"buyer_email\", \"buyer_reset_code\", \"buyer_new_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
-                  "pm.variables.set(\"reset_body\",JSON.stringify({email:pm.environment.get(\"buyer_email\"),code:pm.environment.get(\"buyer_reset_code\"),new_password:pm.environment.get(\"buyer_new_password\")}));"
+                  "for (const key of [\"buyer_email\", \"buyer_used_reset_code\", \"buyer_new_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "pm.variables.set(\"reset_body\",JSON.stringify({email:pm.environment.get(\"buyer_email\"),code:pm.environment.get(\"buyer_used_reset_code\"),new_password:pm.environment.get(\"buyer_new_password\")}));"
                 ]
               }
             },

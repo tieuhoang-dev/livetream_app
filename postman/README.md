@@ -41,12 +41,27 @@ Chạy **từng request** trong folder `01 - Setup tai khoan (THU CONG)`:
 
 1. Điền email bạn kiểm soát và password cho seller/buyer.
 2. `AUTH-001`: đăng ký seller, mong đợi 200.
-3. Lấy OTP từ email, điền `seller_verification_code`, chạy `AUTH-002` Verify
-   seller, mong đợi 200.
+3. Lấy OTP từ email, mở `AUTH-002` → **Body → raw → JSON**. Nhập trực tiếp
+   OTP vào trường `code` đang để trống, rồi bấm **Send**, mong đợi 200:
+
+   ```json
+   {
+     "email": "{{seller_email}}",
+     "code": ""
+   }
+   ```
+
+   Ví dụ email có mã `012345` thì sửa thành `"code": "012345"`, giữ dấu nháy
+   để không mất số 0 đầu. Script không tạo hay ghi đè mã bạn nhập.
 4. Chỉ sau khi Verify thành công, chạy `AUTH-003` Login seller, mong đợi 200;
    token và user ID được lưu tự động.
-5. Làm tương tự cho buyer: `AUTH-004` đăng ký → nhập `buyer_verification_code`
-   → `AUTH-005` Verify → `AUTH-006` Login.
+5. Làm tương tự cho buyer: `AUTH-004` đăng ký → mở Body của `AUTH-005`, nhập
+   OTP vào `code` và Send Verify → `AUTH-006` Login.
+
+**Postman Collection Runner không có popup để nhập OTP hoặc dừng chờ bạn đọc
+email.** Folder 01 phải chạy từng request bằng nút Send. Nếu `code` còn trống,
+pre-request báo rõ cần nhập mã trong Body. Chỉ gửi Login sau khi Verify trả
+200. Không cần đặt biến Environment cho OTP xác thực.
 
 Folder 01 chỉ có luồng thành công; cả 6 request đều mong đợi HTTP 200. Case
 đăng nhập khi chưa verify bị chặn được tách riêng ở folder 07, dùng tài khoản
@@ -127,12 +142,15 @@ Folder `06 - Reset mat khau (THU CONG)` phải chạy từng bước, trên tài
 buyer. Các case trong folder có điều kiện khác nhau, không Run cả folder.
 
 1. `RESET-001`: khi Brevo đã cấu hình, yêu cầu OTP, mong đợi 200.
-2. Điền `buyer_reset_code` từ email, `buyer_new_password` khác mật khẩu cũ.
+2. Đặt `buyer_new_password` khác mật khẩu cũ trong Environment. Mở
+   `RESET-002` → Body → raw → JSON, nhập OTP từ email vào trường `code` đang
+   trống, rồi Send. Không cần nhập biến Environment cho OTP reset.
 3. `RESET-002`: xác nhận reset, mong đợi 200. Script tự lưu mật khẩu cũ vào
    `buyer_previous_password`, rồi cập nhật `buyer_password` trong Environment.
 4. `RESET-003`: login mật khẩu cũ trả 400; `RESET-004`: mật khẩu mới trả 200,
    cập nhật `buyer_token`.
-5. `RESET-005`: dùng lại OTP vừa dùng trả `400 otp_expired` (mã đã bị xóa).
+5. `RESET-005`: tự lấy mã vừa xác nhận từ `buyer_used_reset_code` để thử dùng
+   lại; phải trả `400 otp_expired` (mã đã bị xóa phía server).
 6. `RESET-006`: email không tồn tại trả 404.
 7. `RESET-007`: **chỉ chạy khi Brevo chưa cấu hình/gửi thất bại**, mong đợi
    `502 email_delivery_failed`. Không chạy giữa bước xin OTP và xác nhận OTP:

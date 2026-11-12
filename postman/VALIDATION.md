@@ -24,6 +24,12 @@ mẫu để trống credential; không chứa OTP fixture hoặc khóa JWT của
 hook chuẩn bị OTP fixture chỉ nằm trong harness kiểm thử riêng, không nằm trong
 script của collection được giao.
 
+Các request Verify seller/buyer và xác nhận reset có trường `code` trống,
+hiển thị trực tiếp trong Body để người dùng nhập OTP rồi Send. Harness xác minh
+điền OTP fixture vào một bản sao trong bộ nhớ để mô phỏng thao tác nhập Body;
+file collection giao vẫn để trống và không tạo OTP hay đọc OTP tự động từ DB.
+Script chặn mã trống/không đủ 6 số, không ghi đè mã người dùng đã nhập.
+
 Toàn bộ 105 request đã được kiểm tra cú pháp JavaScript. JSON được Newman đọc
 và thực thi; những tên biến response tránh các global legacy của Postman.
 
