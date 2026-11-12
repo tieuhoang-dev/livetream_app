@@ -161,6 +161,18 @@ export class TestRunner {
         await this.wsRequest('buyer', {type: 'join_live', content: reply.id}, 'join_live_error');
       }
     }
+    if (step.folder.startsWith('05 -') && !this.env.live_product_id) {
+      await this.ensureToken('seller');
+      this.emit('system', {message: 'Tạo sản phẩm test cho live đã kết thúc…'});
+      const response = await this.fetchImpl(this.backendUrl + '/api/products', {
+        method: 'POST', credentials: 'omit', redirect: 'error', signal: AbortSignal.timeout(30000),
+        headers: {'Content-Type': 'application/json', Authorization: 'Bearer ' + this.env.seller_token},
+        body: JSON.stringify({name: 'PM_ended_' + this.env.run_id, price: 100000, stock_quantity: 20})
+      });
+      const product = await response.json();
+      if (response.status !== 201 || !product.id) throw new Error(product.error || 'Không chuẩn bị được sản phẩm cho live đã kết thúc');
+      this.env.live_product_id = product.id;
+    }
     if (step.key.startsWith('NEG-')) await this.credentials('unverified');
     let raw = step.runtimeBody ?? step.request.body?.raw ?? '';
     const url = typeof step.request.url === 'string' ? step.request.url : step.request.url.raw;
