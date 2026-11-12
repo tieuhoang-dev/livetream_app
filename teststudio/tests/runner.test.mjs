@@ -161,3 +161,33 @@ test('collection scripts cannot change the configured backend destination', asyn
   assert.equal(backend.calls.length,1);
   assert.equal(new URL(report.results[0].url).origin,backend.base_url);
 });
+
+test('AUTH-001 keeps its real JSON body on a network failure and never auto-retries Register', async () => {
+  const seller = structuredClone(onboarding);
+  seller.item[0].item = seller.item[0].item.slice(0, 1);
+  let sent, requests = 0;
+  const runner = new TestRunner(seller, {workerFactory,
+    fetchImpl: async (url, options) => {
+      requests++; sent = {url, body:JSON.parse(options.body)};
+      throw new TypeError('Failed to fetch');
+    },
+    requestInput: async input => {
+      assert.equal(input.kind, 'failure');
+      assert.equal(input.result.transportError, true);
+      assert.equal(input.result.request.email, config.seller_email);
+      assert.equal(input.result.request.password, '••••••');
+      return {action:'continue'};
+    }
+  });
+  const report = await runner.start({...config,base_url:'http://localhost:8080'},[seller.item[0].name]);
+  assert.equal(requests, 1);
+  assert.equal(sent.url, 'http://localhost:8080/api/users/register');
+  assert.equal(sent.body.email, config.seller_email);
+  assert.equal(sent.body.password, config.seller_password);
+  assert.ok(sent.body.username);
+  assert.equal(report.failed, 1);
+  assert.equal(report.results[0].request.email, config.seller_email);
+  assert.equal(report.results[0].code, null);
+  assert.match(report.results[0].error, /POST http:\/\/localhost:8080\/api\/users\/register/);
+  assert.ok(!JSON.stringify(report).includes(config.seller_password));
+});

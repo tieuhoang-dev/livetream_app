@@ -9,7 +9,7 @@ import (
 
 func TestEmbeddedRunner(t *testing.T) {
 	handler := Handler()
-	for _, path := range []string{"/", "/app.js", "/runner.js", "/sandbox.worker.js", "/data/collection.json"} {
+	for _, path := range []string{"/", "/app.js", "/runner.js", "/connection.js", "/sandbox.worker.js", "/data/collection.json"} {
 		t.Run(path, func(t *testing.T) {
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, httptest.NewRequest("GET", path, nil))

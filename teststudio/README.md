@@ -18,6 +18,11 @@ vừa thành công trên cùng môi trường.
 
 ## Bản local
 
+Backend cũng phục vụ Studio tại `http://localhost:8080/teststudio/`. Mở địa chỉ
+này sau khi cập nhật code và khởi động lại backend; Studio tự dùng cùng origin,
+không cần CORS giữa hai trang. Không phải chạy thêm server giao diện.
+
+
 Mở Studio qua HTTP server, không mở trực tiếp file HTML:
 
 ```sh
@@ -55,10 +60,22 @@ server hosting; request được gửi trực tiếp từ trình duyệt tới b
   không phải upload media; collection HTTP 105 case chưa bao gồm toàn bộ
   checklist WebSocket/edge case trong tài liệu trước đó.
 
+## Chẩn đoán kết nối
+
+Nút Kiểm tra kết nối kiểm tra cả GET sản phẩm và POST JSON tới login với body
+`{}` và header Authorization giả dành riêng cho probe. Controller trả HTTP 400
+vì thiếu email/password; probe không tạo tài khoản hoặc gửi OTP. Chỉ GET thành
+công chưa đủ để hiện trạng thái sẵn sàng. Probe và runner dùng cùng chế độ
+credentials/redirect.
+
+Nếu fetch bị chặn, chi tiết vẫn hiện JSON đã chuẩn bị gửi (mật khẩu được che),
+URL, method và lỗi trình duyệt. Không tự retry Register: nếu đã nhận OTP dù
+response bị mất, chọn Tiếp tục bước sau để Verify trên cùng phiên.
+
 ## Kiểm tra
 
 ```sh
-node --test tests/runner.test.mjs
+node --test tests/runner.test.mjs tests/connection.test.mjs
 ```
 
 Kiểm tra chờ OTP, resume cùng cursor, nhập sai mã chỉ retry Verify, dừng khi

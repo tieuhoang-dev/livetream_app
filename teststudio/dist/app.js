@@ -1,7 +1,9 @@
 import {TestRunner, flattenCollection} from './runner.js';
 import {redact} from './assertions.js';
+import {checkConnection, normalizeBackendUrl} from './connection.js';
 
 const $ = id => document.getElementById(id);
+if (location.pathname.startsWith('/teststudio/')) $('base-url').value = location.origin;
 const labels = ['Tài khoản & OTP', 'Sản phẩm & đơn hàng', 'Upload avatar', 'Sản phẩm trong live', 'Live đã kết thúc', 'Đổi mật khẩu', 'Chặn tài khoản chưa verify'];
 const symbols = {passed: '✓', failed: '!', skipped: '↷', running: '◌', waiting: 'Ⅱ', idle: '○'};
 let collection, runner, all = [], selectedFolders = new Set(), results = [], plan = [], activeKey = '', selectedKey = '', filter = 'all', pendingResolver = null, detailTab = 'response', collapsed = new Set();
@@ -83,7 +85,10 @@ function renderDetails() {
     const b = el('button', key === detailTab ? 'active' : '', label); b.addEventListener('click', () => { detailTab = key; renderDetails(); }); tabs.append(b);
   }
   target.append(tabs);
-  let body = result ? result[detailTab] : detailTab === 'request' ? step.request.body?.raw || 'Không có body' : 'Response sẽ xuất hiện khi chạy bước này.';
+  const sent = runner?.all.find(s => s.key === step.key)?.sent;
+  let body = detailTab === 'request'
+    ? result?.request ?? sent?.request ?? step.request.body?.raw ?? 'Không có body'
+    : result?.response ?? (result?.transportError ? 'Trình duyệt chưa cung cấp response HTTP. Mở tab Request để xem JSON đã chuẩn bị gửi.' : 'Response sẽ xuất hiện khi chạy bước này.');
   try { body = redact(JSON.parse(body)); } catch {}
   target.append(el('pre', 'detail-code', typeof body === 'string' ? body : JSON.stringify(body ?? 'Không có nội dung', null, 2)));
 }
@@ -161,7 +166,10 @@ function askUser(input) {
       for (const [label, action] of [['Tiếp tục bước sau', 'continue'], ['Bỏ qua phần còn lại của nhóm', 'skip-group']]) {
         const b = el('button', 'button secondary', label); b.type = 'button'; b.addEventListener('click', () => completeInput({action})); actions.append(b);
       }
-      card.append(el('div', 'prompt-hint', 'Thử lại chỉ chạy bước hiện tại. Với request tạo dữ liệu, hãy kiểm tra response trước khi gửi lại.'));
+      const registerUncertain = input.result?.transportError && ['AUTH-001', 'AUTH-004'].includes(input.step?.key);
+      card.append(el('div', 'prompt-hint', registerUncertain
+        ? 'Nếu đã nhận OTP, chọn Tiếp tục bước sau để xác thực; không gửi Register lại. Request có thể đã được server xử lý dù trình duyệt không đọc được response.'
+        : 'Thử lại chỉ chạy bước hiện tại. Với request tạo dữ liệu, hãy kiểm tra response trước khi gửi lại.'));
     }
     actions.prepend(proceed); card.append(actions);
     card.addEventListener('submit', event => { event.preventDefault(); if (!card.reportValidity()) return; completeInput(collect()); });
@@ -193,7 +201,7 @@ $('start-button').addEventListener('click', async () => {
   if (active || !$('config-form').reportValidity()) return;
   if ($('seller-email').value.trim() === $('buyer-email').value.trim()) return toast('Seller và buyer cần là hai tài khoản test khác nhau.');
   const config = {base_url: $('base-url').value.trim(), account_mode: mode(), seller_email: $('seller-email').value.trim(), seller_password: $('seller-password').value, buyer_email: $('buyer-email').value.trim(), buyer_password: $('buyer-password').value};
-  try { new URL(config.base_url); } catch { return toast('Địa chỉ backend chưa hợp lệ.'); }
+  try { config.base_url = normalizeBackendUrl(config.base_url); } catch (error) { return toast(error.message); }
   if (!selectedFolders.size) return toast('Chọn ít nhất một nhóm test.');
   results = []; plan = []; activeKey = ''; active = true; startedAt = Date.now();
   setConfigEnabled(false); $('start-button').hidden = true; $('stop-button').hidden = false; $('pause-button').disabled = false;
@@ -204,15 +212,22 @@ $('start-button').addEventListener('click', async () => {
 $('pause-button').addEventListener('click', () => { if (!runner || !active) return; if (pendingResolver && currentStatus === 'waiting') return; runner.pause(); $('pause-button').disabled = true; $('pause-button').textContent = 'Đang tạm dừng…'; });
 $('stop-button').addEventListener('click', () => { if (!runner || !active) return; runner.stop(); if (pendingResolver) completeInput({action: 'stop'}); });
 $('config-toggle').addEventListener('click', () => { $('config-form').hidden = !$('config-form').hidden; $('config-toggle').setAttribute('aria-expanded', String(!$('config-form').hidden)); $('config-chevron').textContent = $('config-form').hidden ? '⌄' : '⌃'; });
+$('base-url').addEventListener('input', () => {
+  $('connection').className = 'connection'; $('connection').replaceChildren(el('i'), document.createTextNode('Chưa kiểm tra URL mới'));
+  $('connection-error').hidden = true;
+});
 for (const radio of document.querySelectorAll('[name=account_mode]')) radio.addEventListener('change', () => { renderSuites(); renderCases(); renderStats(); });
 for (const b of document.querySelectorAll('[data-filter]')) b.addEventListener('click', () => { filter = b.dataset.filter; document.querySelectorAll('[data-filter]').forEach(button => button.classList.toggle('active', button === b)); renderCases(); });
 $('check-button').addEventListener('click', async () => {
   $('check-button').disabled = true; $('check-button').textContent = 'Đang kiểm tra…';
   try {
-    const base = $('base-url').value.trim().replace(/\/$/, ''); const res = await fetch(base + '/api/products?page=1&page_size=1', {signal: AbortSignal.timeout(10000), credentials: 'omit'});
-    if (!res.ok) throw new Error('HTTP ' + res.status); const body = await res.json(); if (!Array.isArray(body.data)) throw new Error('Response không đúng API sản phẩm');
-    $('connection').className = 'connection good'; $('connection').replaceChildren(el('i'), document.createTextNode('Đã kết nối')); toast('Backend đã sẵn sàng.');
-  } catch (error) { $('connection').className = 'connection bad'; $('connection').replaceChildren(el('i'), document.createTextNode('Chưa truy cập được')); toast('Không kết nối được backend. Kiểm tra URL/CORS. Với localhost, có thể cần mở bản Studio local hoặc cho phép quyền truy cập mạng nội bộ.'); }
+    await checkConnection($('base-url').value);
+    $('connection').className = 'connection good'; $('connection').replaceChildren(el('i'), document.createTextNode('GET + POST sẵn sàng')); toast('Đã kiểm tra GET và POST JSON. Các request tạo dữ liệu vẫn chỉ chạy khi bạn bấm Bắt đầu.');
+    $('connection-error').hidden = true;
+  } catch (error) {
+    $('connection').className = 'connection bad'; $('connection').replaceChildren(el('i'), document.createTextNode('Kết nối chưa đủ'));
+    $('connection-error').textContent = error.message; $('connection-error').hidden = false; toast('Kiểm tra kết nối chưa đạt. Xem thông báo dưới Địa chỉ backend.');
+  }
   finally { $('check-button').disabled = false; $('check-button').textContent = 'Kiểm tra kết nối'; }
 });
 $('export-button').addEventListener('click', () => {

@@ -42,6 +42,7 @@
         <form id="config-form">
           <div class="backend-row"><label class="field flex-field">Địa chỉ backend<span class="input-wrap"><span class="input-prefix">↗</span><input id="base-url" type="url" value="http://localhost:8080" placeholder="http://localhost:8080" required spellcheck="false"></span></label><button type="button" id="check-button" class="button secondary">Kiểm tra kết nối</button></div>
           <p class="field-hint">Backend phải truy cập được từ trình duyệt của bạn. Với API localhost, mở bản local của Studio nếu trình duyệt chặn truy cập mạng nội bộ.</p>
+          <p id="connection-error" class="detail-error" role="alert" hidden></p>
           <div class="mode-row"><span>Tài khoản</span><div class="segmented"><label><input type="radio" name="account_mode" value="new" checked><span>Đăng ký mới <small>Có OTP</small></span></label><label><input type="radio" name="account_mode" value="existing"><span>Đã xác thực</span></label></div></div>
           <div class="account-grid">
             <fieldset><legend><span class="avatar seller">S</span> Người bán <small>SELLER</small></legend><label class="field">Email<input id="seller-email" type="email" placeholder="seller@example.com" required autocomplete="off"></label><label class="field">Mật khẩu<input id="seller-password" type="password" placeholder="Mật khẩu tài khoản test" required autocomplete="new-password"></label></fieldset>

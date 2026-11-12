@@ -1,4 +1,5 @@
 import {redact} from './assertions.js';
+import {normalizeBackendUrl, transportMessage} from './connection.js';
 
 export function flattenCollection(collection) {
   const result = [];
@@ -60,7 +61,7 @@ export class TestRunner {
   stop() { this.stopped = true; this.abortController?.abort(); this.emit('stop-requested'); }
   async start(config, folders) {
     if (this.status !== 'idle') throw new Error('Phiên này đã được bắt đầu');
-    this.env = {...config}; this.env.base_url = String(config.base_url || '').replace(/\/$/, '');
+    this.env = {...config}; this.env.base_url = normalizeBackendUrl(config.base_url);
     this.env.run_id ||= Date.now().toString(36) + '_' + crypto.randomUUID().slice(0, 8);
     this.env.product_name ||= 'PM_' + this.env.run_id;
     this.env.missing_id ||= crypto.randomUUID();
@@ -254,21 +255,27 @@ export class TestRunner {
         else body.append(field.key, this.replace(field.value || '', pre.locals));
       }
     }
+    let requestBody = body instanceof FormData ? {file: '[file upload]'} : body;
+    try { requestBody = JSON.parse(requestBody); } catch {}
+    const sent = {url: url.href, request: redact(requestBody ?? null), requestHeaders: redact(Object.fromEntries(headers))};
+    step.sent = sent;
+    this.emit('request-ready', {step, sent});
     this.abortController = new AbortController();
     const timer = setTimeout(() => this.abortController.abort(), 30000); const started = performance.now();
     let response, text;
     try { response = await this.fetchImpl(url.href, {method: step.request.method, headers, body: ['GET', 'HEAD'].includes(step.request.method) ? undefined : body, signal: this.abortController.signal, credentials: 'omit', redirect: 'error'}); text = await response.text(); }
-    catch (error) { throw new Error(error.name === 'AbortError' ? 'Request đã dừng hoặc quá 30 giây.' : 'Không gọi được backend. Kiểm tra URL, CORS, quyền truy cập mạng nội bộ hoặc mở bản local của Studio.'); }
+    catch (error) {
+      return {...sent, status: 'failed', transportError: true, code: response?.status ?? null,
+        error: transportMessage(error, step.request.method, url.href), tests: [], duration: Math.round(performance.now() - started)};
+    }
     finally { clearTimeout(timer); }
     const duration = Math.round(performance.now() - started);
     const post = await this.sandbox.run({scripts: scripts('test'), env: this.env, locals: pre.locals, request: {raw: body instanceof FormData ? '' : body || ''}, response: {code: response.status, text, duration, headers: Object.fromEntries(response.headers)}});
     this.env = {...post.env, base_url: this.backendUrl};
     if (step.key === 'RESET-001' && response.status === 200) this.emailReady = true;
-    let requestBody = body instanceof FormData ? {file: '[file upload]'} : body;
-    try { requestBody = JSON.parse(requestBody); } catch {}
     let responseBody = text; try { responseBody = JSON.parse(text); } catch {}
     return {status: post.error || post.tests.some(t => !t.passed) ? 'failed' : 'passed', error: post.error, code: response.status, duration,
-      tests: post.tests, url: url.href, request: redact(requestBody), response: redact(responseBody), responseHeaders: Object.fromEntries(response.headers)};
+      tests: post.tests, ...sent, response: redact(responseBody), responseHeaders: Object.fromEntries(response.headers)};
   }
   report() {
     return {name: this.collection.info?.name, startedAt: this.startedAt, status: this.status, cursor: this.cursor, total: this.plan?.length || 0,

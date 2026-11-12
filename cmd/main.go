@@ -4,7 +4,9 @@ import (
 	"livesteam_app/config"
 	"livesteam_app/models"
 	"livesteam_app/routes"
+	"livesteam_app/teststudio"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -49,6 +51,7 @@ func main() {
 		MaxAge: 12 * time.Hour,
 	}))
 	r.Static("/uploads", filepath.Join(".", "uploads"))
+	r.GET("/teststudio/*path", gin.WrapH(http.StripPrefix("/teststudio", teststudio.Handler())))
 	routes.SetupUserRoutes(r)
 	port := os.Getenv("PORT")
 	if port == "" {
