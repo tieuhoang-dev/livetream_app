@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#142b24">
+  <meta name="description" content="Chạy bộ test Livestream API. Tự động xử lý các bước, dừng đúng lúc để bạn nhập OTP và tiếp tục phiên đang chạy.">
+  <title>Livestream Test Studio</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="./"><span class="brand-mark">◈</span><span>Livestream<span class="brand-sub">TEST STUDIO</span></span></a>
+    <div class="workspace-badge"><span class="status-dot"></span> Không gian kiểm thử <span class="badge-mini">API</span></div>
+    <div class="nav-label">BỘ KIỂM THỬ <span id="total-badge">—</span></div>
+    <div id="suite-list" class="suite-list"><span class="muted">Đang nạp bộ test…</span></div>
+    <div class="sidebar-bottom">
+      <div class="sidebar-note"><span>↳</span><div>Tự động từng bước<small>Nhập dữ liệu khi được yêu cầu.</small></div></div>
+      <a href="https://github.com/tieuhoang-dev/livetream_app" target="_blank" rel="noreferrer">Mã nguồn Livestream <span>↗</span></a>
+      <div class="version">Test Studio <span>v1.0</span></div>
+    </div>
+  </aside>
+
+  <div class="shell">
+    <header class="topbar">
+      <div class="breadcrumbs"><span class="tiny-grid">▦</span><span>Không gian kiểm thử</span><span class="slash">/</span><strong>Livestream API</strong></div>
+      <div class="top-actions"><span id="connection" class="connection"><i></i> Chưa kết nối</span><button class="button icon-button" id="import-button" title="Nạp collection JSON">↥ <span>Nạp bộ test</span></button><input type="file" id="import-file" accept=".json,application/json" hidden></div>
+    </header>
+
+    <main>
+      <div class="page-heading"><div><div class="eyebrow"><span></span> KIỂM THỬ CÓ HƯỚNG DẪN</div><h1>Chạy test. Nhập đúng lúc.</h1><p>Các bước chạy tự động. Đến OTP hay chọn file, Studio sẽ chờ bạn.</p></div><button id="export-button" class="button secondary" disabled>↓ <span>Xuất kết quả</span></button></div>
+
+      <section class="stats" aria-label="Kết quả phiên">
+        <div class="stat"><div class="stat-icon neutral">▦</div><div><span>Đã nạp</span><strong id="stat-loaded">0</strong></div><small>test case</small></div>
+        <div class="stat"><div class="stat-icon green">✓</div><div><span>Đạt</span><strong id="stat-passed">0</strong></div><small id="stat-selected">chưa chạy</small></div>
+        <div class="stat"><div class="stat-icon red">!</div><div><span>Chưa đạt</span><strong id="stat-failed">0</strong></div><small>cần kiểm tra</small></div>
+        <div class="stat"><div class="stat-icon amber">↷</div><div><span>Bỏ qua</span><strong id="stat-skipped">0</strong></div><small>theo điều kiện</small></div>
+      </section>
+
+      <section class="card config-card" id="config-card">
+        <button class="section-heading config-toggle" id="config-toggle" aria-expanded="true"><span class="heading-icon">⚙</span><span>Cấu hình phiên chạy</span><span class="heading-help">Nhập một lần, dùng cho cả phiên</span><span id="config-chevron">⌃</span></button>
+        <form id="config-form">
+          <div class="backend-row"><label class="field flex-field">Địa chỉ backend<span class="input-wrap"><span class="input-prefix">↗</span><input id="base-url" type="url" value="http://localhost:8080" placeholder="http://localhost:8080" required spellcheck="false"></span></label><button type="button" id="check-button" class="button secondary">Kiểm tra kết nối</button></div>
+          <p class="field-hint">Backend phải truy cập được từ trình duyệt của bạn. Với API localhost, mở bản local của Studio nếu trình duyệt chặn truy cập mạng nội bộ.</p>
+          <div class="mode-row"><span>Tài khoản</span><div class="segmented"><label><input type="radio" name="account_mode" value="new" checked><span>Đăng ký mới <small>Có OTP</small></span></label><label><input type="radio" name="account_mode" value="existing"><span>Đã xác thực</span></label></div></div>
+          <div class="account-grid">
+            <fieldset><legend><span class="avatar seller">S</span> Người bán <small>SELLER</small></legend><label class="field">Email<input id="seller-email" type="email" placeholder="seller@example.com" required autocomplete="off"></label><label class="field">Mật khẩu<input id="seller-password" type="password" placeholder="Mật khẩu tài khoản test" required autocomplete="new-password"></label></fieldset>
+            <fieldset><legend><span class="avatar buyer">B</span> Người mua <small>BUYER</small></legend><label class="field">Email<input id="buyer-email" type="email" placeholder="buyer@example.com" required autocomplete="off"></label><label class="field">Mật khẩu<input id="buyer-password" type="password" placeholder="Mật khẩu tài khoản test" required autocomplete="new-password"></label></fieldset>
+          </div>
+          <div class="config-foot"><span class="small-shield">◇</span><span>Mật khẩu và OTP chỉ giữ trong bộ nhớ phiên. Bộ test thay đổi dữ liệu trên backend test của bạn.</span></div>
+        </form>
+      </section>
+
+      <div class="work-grid">
+        <section class="card run-card">
+          <div class="run-toolbar"><div><span id="run-dot" class="run-dot"></span><strong id="run-title">Sẵn sàng kiểm thử</strong><span id="run-subtitle">Chọn nhóm test bên trái để bắt đầu</span></div><div class="run-actions"><span id="elapsed" class="elapsed">00:00</span><button class="button secondary small" id="pause-button" disabled>Ⅱ Tạm dừng</button><button class="button danger small" id="stop-button" hidden>Dừng</button><button class="button primary" id="start-button">▶ Bắt đầu chạy</button></div></div>
+          <div class="progress-track"><div id="progress-bar"></div></div>
+          <div id="prompt-area" aria-live="polite"></div>
+          <div class="test-list-heading"><span>TEST CASE</span><div class="filter-group"><button class="filter active" data-filter="all">Tất cả</button><button class="filter" data-filter="failed">Chưa đạt</button></div></div>
+          <div id="case-list" class="case-list"></div>
+          <div class="list-footer"><span class="live-caption"><i></i> <span id="footer-status">Chưa có request nào được gửi</span></span><span id="footer-count">0 / 0</span></div>
+        </section>
+        <aside class="card inspector"><div class="inspector-heading"><span>Chi tiết bước</span><span class="badge-mini">HTTP</span></div><div id="details-content" class="details-content"><div class="details-empty"><div class="empty-icon">⌘</div><h3>Mọi bước đều có thể kiểm tra</h3><p>Chọn một test case để xem request, response và từng assertion.</p><div class="process-mini"><span>Request</span><i>→</i><span>Kiểm tra</span><i>→</i><span>Kết quả</span></div></div></div></aside>
+      </div>
+      <footer class="page-footer"><span>Đăng ký → <strong>Chờ OTP</strong> → Xác thực → Đăng nhập → API</span><span>Tiếp tục đúng bước. Không đăng ký lại.</span></footer>
+    </main>
+  </div>
+  <div id="toast" role="status"></div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
