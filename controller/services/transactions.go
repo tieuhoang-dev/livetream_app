@@ -37,7 +37,7 @@ func OrderProduct(userID, productID string, quantity int, livestreamID *string, 
 				return errors.New("livestream_not_active")
 			}
 			var product models.LivestreamProduct
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("livestream_id = ? AND product_code = ?", *livestreamID, productID).First(&product).Error; err != nil {
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("livestream_id = ? AND product_id = ?", *livestreamID, productID).First(&product).Error; err != nil {
 				return lookupError(err, "product_not_found_in_livestream")
 			}
 			price, stock, updateModel = product.DiscountPrice, product.StockQuantity, &product
@@ -100,7 +100,7 @@ func AddProductToLivestream(userID, livestreamID, productID string, discountPric
 			return errors.New("livestream_not_active")
 		}
 		var existing int64
-		if err := tx.Model(&models.LivestreamProduct{}).Where("livestream_id = ? AND product_code = ?", livestreamID, productID).Count(&existing).Error; err != nil {
+		if err := tx.Model(&models.LivestreamProduct{}).Where("livestream_id = ? AND product_id = ?", livestreamID, productID).Count(&existing).Error; err != nil {
 			return err
 		}
 		if existing > 0 {
@@ -135,7 +135,7 @@ func RemoveProductFromLivestream(userID, livestreamID, productID string) error {
 			return err
 		}
 		var liveProduct models.LivestreamProduct
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("livestream_id = ? AND product_code = ?", livestreamID, productID).First(&liveProduct).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("livestream_id = ? AND product_id = ?", livestreamID, productID).First(&liveProduct).Error; err != nil {
 			return lookupError(err, "product_not_found_in_livestream")
 		}
 		var activeOrders int64
@@ -202,7 +202,7 @@ func RefundOrder(userID, orderID, action, refundReason string) error {
 		for _, item := range items {
 			query := tx.Model(&models.Product{}).Where("id = ?", item.ProductID)
 			if order.LivestreamID != nil {
-				query = tx.Model(&models.LivestreamProduct{}).Where("livestream_id = ? AND product_code = ?", *order.LivestreamID, item.ProductID)
+				query = tx.Model(&models.LivestreamProduct{}).Where("livestream_id = ? AND product_id = ?", *order.LivestreamID, item.ProductID)
 			}
 			result := query.UpdateColumn("stock_quantity", gorm.Expr("stock_quantity + ?", item.Quantity))
 			if result.Error != nil {

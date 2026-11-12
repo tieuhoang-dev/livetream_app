@@ -1,0 +1,135 @@
+{
+  "description": "Thư viện payload để copy vào Postman WebSocket Request. Không phải collection import tự động.",
+  "seller_url": "{{ws_url}}/api/auth/ws?token={{seller_token}}",
+  "buyer_url": "{{ws_url}}/api/auth/ws?token={{buyer_token}}",
+  "messages": [
+    {
+      "case": "WS-003",
+      "tab": "seller",
+      "payload": {
+        "type": "create_live",
+        "content": "Postman live"
+      }
+    },
+    {
+      "case": "WS-004",
+      "tab": "buyer",
+      "payload": {
+        "type": "join_live",
+        "content": "{{live_id}}"
+      }
+    },
+    {
+      "case": "WS-005",
+      "tab": "buyer",
+      "payload": {
+        "type": "end_live",
+        "content": "{{live_id}}"
+      }
+    },
+    {
+      "case": "WS-006",
+      "tab": "buyer",
+      "payload": {
+        "type": "join_live",
+        "content": "{{missing_id}}"
+      }
+    },
+    {
+      "case": "WS-007/008",
+      "tab": "seller",
+      "payload": {
+        "type": "text",
+        "receiver_id": "{{buyer_id}}",
+        "sender_id": "{{buyer_id}}",
+        "temp_id": "pm-msg-001",
+        "content": "Xin chào từ Postman"
+      }
+    },
+    {
+      "case": "WS-009",
+      "tab": "seller",
+      "payload": {
+        "type": "text",
+        "temp_id": "pm-missing-receiver",
+        "content": "Thiếu người nhận"
+      }
+    },
+    {
+      "case": "WS-010",
+      "tab": "seller",
+      "payload": {
+        "type": "message",
+        "receiver_id": "{{buyer_id}}",
+        "temp_id": "pm-message-001",
+        "content": "Postman message test"
+      }
+    },
+    {
+      "case": "WS-010",
+      "tab": "seller",
+      "payload": {
+        "type": "text",
+        "receiver_id": "{{buyer_id}}",
+        "temp_id": "pm-text-001",
+        "content": "Postman text test"
+      }
+    },
+    {
+      "case": "WS-010",
+      "tab": "seller",
+      "payload": {
+        "type": "image",
+        "receiver_id": "{{buyer_id}}",
+        "temp_id": "pm-image-001",
+        "content": "Postman image test"
+      }
+    },
+    {
+      "case": "WS-010",
+      "tab": "seller",
+      "payload": {
+        "type": "video",
+        "receiver_id": "{{buyer_id}}",
+        "temp_id": "pm-video-001",
+        "content": "Postman video test"
+      }
+    },
+    {
+      "case": "WS-010",
+      "tab": "seller",
+      "payload": {
+        "type": "voice",
+        "receiver_id": "{{buyer_id}}",
+        "temp_id": "pm-voice-001",
+        "content": "Postman voice test"
+      }
+    },
+    {
+      "case": "WS-010",
+      "tab": "seller",
+      "payload": {
+        "type": "file",
+        "receiver_id": "{{buyer_id}}",
+        "temp_id": "pm-file-001",
+        "content": "Postman file test"
+      }
+    },
+    {
+      "case": "WS-011",
+      "tab": "seller",
+      "payload": {
+        "type": "end_live",
+        "content": "{{live_id}}"
+      }
+    },
+    {
+      "case": "WS-012",
+      "tab": "buyer",
+      "payload": {
+        "type": "join_live",
+        "content": "{{ended_live_id}}"
+      }
+    }
+  ]
+}

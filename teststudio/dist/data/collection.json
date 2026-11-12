@@ -1,0 +1,4972 @@
+{
+  "info": {
+    "_postman_id": "f33c42c4-5df9-4daf-aae4-301ab7c9e819",
+    "name": "Livestream App - API regression",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Theo main 7dc3dd0. Luồng chính: Register → dừng nhập OTP trong Body.code → Verify thành công → Login. Runner kết thúc lượt sau mỗi Register và yêu cầu OTP reset thành công. Sau khi nhập OTP và Save, bắt đầu lượt Run mới từ Verify, bỏ chọn Register đã chạy. Không có popup hoặc tự Resume trong cùng lượt. Folder 02 chạy tự động liền mạch trên hai tài khoản đã verified; các folder file/live cần điều kiện riêng. Token/ID tự lưu trong Environment; không chứa credential thật."
+  },
+  "item": [
+    {
+      "name": "01 - Setup tai khoan (THU CONG)",
+      "description": "Register thành công sẽ kết thúc lượt Runner để chờ bạn nhập OTP. Nhập code trong Body Verify, Save, rồi bắt đầu lượt Run mới từ Verify (bỏ chọn Register đã chạy). Có thể gửi từng request bằng Send. Luồng chính: Register → Verify → Login. Đây không phải pause/resume cùng một lượt và không có popup OTP.",
+      "item": [
+        {
+          "name": "AUTH-001 | Đăng ký seller (dừng Runner chờ OTP)",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/register",
+            "description": "Email phải do bạn kiểm soát và chưa đăng ký. Cần Brevo để nhận OTP. Không chạy lại request thành công này với cùng email.",
+            "body": {
+              "mode": "raw",
+              "raw": "{{register_body}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"seller_email\", \"seller_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "if (!pm.environment.get(\"seller_username\")) pm.environment.set(\"seller_username\", \"pm_seller_\" + Date.now().toString(36));",
+                  "pm.variables.set(\"register_body\", JSON.stringify({username: pm.environment.get(\"seller_username\"), email: pm.environment.get(\"seller_email\"), password: pm.environment.get(\"seller_password\")}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTH-001: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"status \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"status\"]).to.eql(\"success\"));",
+                  "if (pm.response.code === 200) { console.info(\"Lượt chạy đã dừng để nhập OTP. Mở Body của Verify, nhập mã email và Save. Bắt đầu lượt Run mới từ Verify, bỏ chọn Register đã chạy; hoặc gửi Verify bằng nút Send.\"); pm.execution.setNextRequest(null); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTH-002 | Nhập OTP trong Body rồi Verify seller",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/verify",
+            "description": "Sau Register, dừng lại mở email. Mở Body → raw → JSON của request này, nhập OTP 6 số vào code đang để trống và bấm Send. Script không tạo hay ghi đè OTP. Chỉ khi HTTP 200 mới chuyển sang Login. Collection Runner không có popup nhập OTP.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{seller_email}}\",\n  \"code\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"seller_email\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "const otpInput = JSON.parse(pm.variables.replaceIn(pm.request.body.raw)); if (typeof otpInput.code !== \"string\" || !/^\\d{6}$/.test(otpInput.code)) throw new Error(\"Nhập mã OTP 6 số nhận qua email vào Body > raw > JSON, trường code. Save rồi Run từ Verify, hoặc bấm Send từng request.\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTH-002: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"status \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"status\"]).to.eql(\"success\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTH-003 | Login seller",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/login",
+            "description": "Login seller",
+            "body": {
+              "mode": "raw",
+              "raw": "{{auth_body}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"seller_email\", \"seller_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "pm.variables.set(\"auth_body\", JSON.stringify({email: pm.environment.get(\"seller_email\"), password: pm.environment.get(\"seller_password\")}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTH-003: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Có JWT\", () => pm.expect(__livestreamBody.token).to.be.a(\"string\").and.not.empty);",
+                  "if (pm.response.code === 200) { const claims = JSON.parse(require(\"buffer\").Buffer.from(__livestreamBody.token.split(\".\")[1], \"base64\").toString(\"utf8\")); pm.environment.set(\"seller_id\", claims.user_id); }",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  pm.environment.set(\"seller_token\", __livestreamBody.token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTH-004 | Đăng ký buyer (dừng Runner chờ OTP)",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/register",
+            "description": "Email phải do bạn kiểm soát và chưa đăng ký. Cần Brevo để nhận OTP. Không chạy lại request thành công này với cùng email.",
+            "body": {
+              "mode": "raw",
+              "raw": "{{register_body}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"buyer_email\", \"buyer_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "if (!pm.environment.get(\"buyer_username\")) pm.environment.set(\"buyer_username\", \"pm_buyer_\" + Date.now().toString(36));",
+                  "pm.variables.set(\"register_body\", JSON.stringify({username: pm.environment.get(\"buyer_username\"), email: pm.environment.get(\"buyer_email\"), password: pm.environment.get(\"buyer_password\")}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTH-004: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"status \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"status\"]).to.eql(\"success\"));",
+                  "if (pm.response.code === 200) { console.info(\"Lượt chạy đã dừng để nhập OTP. Mở Body của Verify, nhập mã email và Save. Bắt đầu lượt Run mới từ Verify, bỏ chọn Register đã chạy; hoặc gửi Verify bằng nút Send.\"); pm.execution.setNextRequest(null); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTH-005 | Nhập OTP trong Body rồi Verify buyer",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/verify",
+            "description": "Sau Register, dừng lại mở email. Mở Body → raw → JSON của request này, nhập OTP 6 số vào code đang để trống và bấm Send. Script không tạo hay ghi đè OTP. Chỉ khi HTTP 200 mới chuyển sang Login. Collection Runner không có popup nhập OTP.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{buyer_email}}\",\n  \"code\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"buyer_email\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "const otpInput = JSON.parse(pm.variables.replaceIn(pm.request.body.raw)); if (typeof otpInput.code !== \"string\" || !/^\\d{6}$/.test(otpInput.code)) throw new Error(\"Nhập mã OTP 6 số nhận qua email vào Body > raw > JSON, trường code. Save rồi Run từ Verify, hoặc bấm Send từng request.\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTH-005: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"status \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"status\"]).to.eql(\"success\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTH-006 | Login buyer",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/login",
+            "description": "Login buyer",
+            "body": {
+              "mode": "raw",
+              "raw": "{{auth_body}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"buyer_email\", \"buyer_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "pm.variables.set(\"auth_body\", JSON.stringify({email: pm.environment.get(\"buyer_email\"), password: pm.environment.get(\"buyer_password\")}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTH-006: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Có JWT\", () => pm.expect(__livestreamBody.token).to.be.a(\"string\").and.not.empty);",
+                  "if (pm.response.code === 200) { const claims = JSON.parse(require(\"buffer\").Buffer.from(__livestreamBody.token.split(\".\")[1], \"base64\").toString(\"utf8\")); pm.environment.set(\"buyer_id\", claims.user_id); }",
+                  "pm.test(\"Buyer khác seller\", () => pm.expect(pm.environment.get(\"buyer_id\")).not.to.eql(pm.environment.get(\"seller_id\")));",
+                  "if (pm.response.code === 200) {",
+                  "  pm.environment.set(\"buyer_token\", __livestreamBody.token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 - HTTP tu dong",
+      "description": "Chọn riêng folder này trong Collection Runner. Cần 2 tài khoản đã verified, active. Login tự lưu token và user ID; run_id mới cho mỗi lượt. Không cần OTP, WebSocket hoặc DB để chạy folder này.",
+      "item": [
+        {
+          "name": "AUTO-001 | Login seller",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/login",
+            "description": "Login seller",
+            "body": {
+              "mode": "raw",
+              "raw": "{{auth_body}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.set(\"run_id\", Date.now().toString(36) + \"_\" + pm.variables.replaceIn(\"{{$randomUUID}}\").slice(0, 8));",
+                  "pm.environment.set(\"product_name\", \"PM_\" + pm.environment.get(\"run_id\"));",
+                  "pm.environment.set(\"missing_id\", pm.variables.replaceIn(\"{{$randomUUID}}\"));",
+                  "for (const key of [\"seller_token\", \"buyer_token\", \"seller_id\", \"buyer_id\", \"product_id\", \"buyer_product_id\", \"disposable_product_id\", \"order_id\", \"cancel_order_id\", \"first_page_id\"]) pm.environment.unset(key);",
+                  "for (const key of [\"seller_email\", \"seller_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "pm.variables.set(\"auth_body\", JSON.stringify({email: pm.environment.get(\"seller_email\"), password: pm.environment.get(\"seller_password\")}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-001: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Có JWT\", () => pm.expect(__livestreamBody.token).to.be.a(\"string\").and.not.empty);",
+                  "if (pm.response.code === 200) { const claims = JSON.parse(require(\"buffer\").Buffer.from(__livestreamBody.token.split(\".\")[1], \"base64\").toString(\"utf8\")); pm.environment.set(\"seller_id\", claims.user_id); }",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  pm.environment.set(\"seller_token\", __livestreamBody.token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-002 | Login buyer",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/login",
+            "description": "Login buyer",
+            "body": {
+              "mode": "raw",
+              "raw": "{{auth_body}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"buyer_email\", \"buyer_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "pm.variables.set(\"auth_body\", JSON.stringify({email: pm.environment.get(\"buyer_email\"), password: pm.environment.get(\"buyer_password\")}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-002: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Có JWT\", () => pm.expect(__livestreamBody.token).to.be.a(\"string\").and.not.empty);",
+                  "if (pm.response.code === 200) { const claims = JSON.parse(require(\"buffer\").Buffer.from(__livestreamBody.token.split(\".\")[1], \"base64\").toString(\"utf8\")); pm.environment.set(\"buyer_id\", claims.user_id); }",
+                  "pm.test(\"Buyer khác seller\", () => pm.expect(pm.environment.get(\"buyer_id\")).not.to.eql(pm.environment.get(\"seller_id\")));",
+                  "if (pm.response.code === 200) {",
+                  "  pm.environment.set(\"buyer_token\", __livestreamBody.token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-003 | WebSocket thiếu JWT",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{base_url}}/api/auth/ws",
+            "description": "WebSocket thiếu JWT"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-003: HTTP 401\", function () { pm.response.to.have.status(401); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"Authorization token missing\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-004 | WebSocket JWT sai",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "invalid-token",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{base_url}}/api/auth/ws",
+            "description": "WebSocket JWT sai"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-004: HTTP 401\", function () { pm.response.to.have.status(401); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"Invalid token\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-005 | Thiếu JWT: POST /api/products",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products",
+            "description": "Thiếu JWT: POST /api/products",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-005: HTTP 401\", function () { pm.response.to.have.status(401); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"Authorization token missing\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-006 | Thiếu JWT: PATCH /api/products/{{missing_id}}",
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products/{{missing_id}}",
+            "description": "Thiếu JWT: PATCH /api/products/{{missing_id}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-006: HTTP 401\", function () { pm.response.to.have.status(401); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"Authorization token missing\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-007 | Thiếu JWT: DELETE /api/products/{{missing_id}}",
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products/{{missing_id}}",
+            "description": "Thiếu JWT: DELETE /api/products/{{missing_id}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-007: HTTP 401\", function () { pm.response.to.have.status(401); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"Authorization token missing\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-008 | Thiếu JWT: POST /api/products/{{missing_id}}/stock",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products/{{missing_id}}/stock",
+            "description": "Thiếu JWT: POST /api/products/{{missing_id}}/stock",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-008: HTTP 401\", function () { pm.response.to.have.status(401); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"Authorization token missing\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-009 | Thiếu JWT: POST /api/orders",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/orders",
+            "description": "Thiếu JWT: POST /api/orders",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-009: HTTP 401\", function () { pm.response.to.have.status(401); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"Authorization token missing\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-010 | Thiếu JWT: PUT /api/users/me",
+          "request": {
+            "method": "PUT",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/me",
+            "description": "Thiếu JWT: PUT /api/users/me",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-010: HTTP 401\", function () { pm.response.to.have.status(401); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"Authorization token missing\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-011 | Tạo sản phẩm seller: giá 100000, kho 30",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products",
+            "description": "Tạo sản phẩm seller: giá 100000, kho 30",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{product_name}}\",\n  \"price\": 100000,\n  \"stock_quantity\": 30,\n  \"description\": \"Postman regression\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-011: HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"ID là UUID\", () => pm.expect(__livestreamBody.id).to.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i));",
+                  "pm.test(\"Không lộ User hoặc credential\", () => { for (const key of [\"user\", \"password_hash\", \"verification_code_hash\", \"password_reset_code_hash\"]) pm.expect(__livestreamBody).not.to.have.property(key); });",
+                  "pm.test(\"seller_id \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"seller_id\"]).to.eql(pm.environment.get(\"seller_id\")));",
+                  "pm.test(\"stock_quantity \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"stock_quantity\"]).to.eql(30));",
+                  "if (pm.response.code === 201) {",
+                  "  pm.environment.set(\"product_id\", __livestreamBody.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-012 | Tạo sản phẩm của buyer",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products",
+            "description": "Tạo sản phẩm của buyer",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"PM_foreign_{{run_id}}\",\n  \"price\": 20000,\n  \"stock_quantity\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-012: HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"seller_id \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"seller_id\"]).to.eql(pm.environment.get(\"buyer_id\")));",
+                  "if (pm.response.code === 201) {",
+                  "  pm.environment.set(\"buyer_product_id\", __livestreamBody.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-013 | Tạo sản phẩm riêng để sửa/xóa",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products",
+            "description": "Tạo sản phẩm riêng để sửa/xóa",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"PM_disposable_{{run_id}}\",\n  \"price\": 25,\n  \"stock_quantity\": 0,\n  \"image_url\": \"https://example.com/product.png\",\n  \"description\": \"Clear me\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-013: HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"stock_quantity \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"stock_quantity\"]).to.eql(0));",
+                  "if (pm.response.code === 201) {",
+                  "  pm.environment.set(\"disposable_product_id\", __livestreamBody.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-014 | Chi tiết sản phẩm công khai",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products/{{product_id}}",
+            "description": "Chi tiết sản phẩm công khai"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"product_id\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-014: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Không lộ User hoặc credential\", () => { for (const key of [\"user\", \"password_hash\", \"verification_code_hash\", \"password_reset_code_hash\"]) pm.expect(__livestreamBody).not.to.have.property(key); });",
+                  "pm.test(\"price \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"price\"]).to.eql(100000));",
+                  "pm.test(\"stock_quantity \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"stock_quantity\"]).to.eql(30));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-015 | Tìm tên và lọc đúng seller",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products?seller_id={{seller_id}}&q={{product_name}}",
+            "description": "Tìm tên và lọc đúng seller"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"seller_id\", \"product_name\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-015: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Đúng một sản phẩm\",()=>{pm.expect(__livestreamBody.total).to.eql(1);pm.expect(__livestreamBody.data).to.have.lengthOf(1);pm.expect(__livestreamBody.data[0].id).to.eql(pm.environment.get(\"product_id\"));});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-016 | Phân trang seller - trang 1",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products?seller_id={{seller_id}}&q={{run_id}}&page=1&page_size=1",
+            "description": "Phân trang seller - trang 1"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"seller_id\", \"run_id\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-016: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Hai sản phẩm, trang có 1 item\",()=>{pm.expect(__livestreamBody.total).to.eql(2);pm.expect(__livestreamBody.data).to.have.lengthOf(1);});",
+                  "if (pm.response.code === 200) {",
+                  "  pm.environment.set(\"first_page_id\", __livestreamBody.data[0].id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-017 | Phân trang seller - trang 2 không trùng",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products?seller_id={{seller_id}}&q={{run_id}}&page=2&page_size=1",
+            "description": "Phân trang seller - trang 2 không trùng"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"seller_id\", \"run_id\", \"first_page_id\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-017: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Trang sau không trùng item\",()=>{pm.expect(__livestreamBody.data).to.have.lengthOf(1);pm.expect(__livestreamBody.data[0].id).not.to.eql(pm.environment.get(\"first_page_id\"));});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-018 | Tìm không có kết quả",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products?q=absent_{{missing_id}}",
+            "description": "Tìm không có kết quả"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-018: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Danh sách rỗng\",()=>{pm.expect(__livestreamBody.total).to.eql(0);pm.expect(__livestreamBody.data).to.eql([]);});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-019 | Query/UUID không hợp lệ: /api/products?page=0",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products?page=0",
+            "description": "Query/UUID không hợp lệ: /api/products?page=0"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-019: HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const __livestreamBody = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-020 | Query/UUID không hợp lệ: /api/products?page_size=101",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products?page_size=101",
+            "description": "Query/UUID không hợp lệ: /api/products?page_size=101"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-020: HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const __livestreamBody = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-021 | Query/UUID không hợp lệ: /api/products?seller_id=bad-id",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products?seller_id=bad-id",
+            "description": "Query/UUID không hợp lệ: /api/products?seller_id=bad-id"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-021: HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const __livestreamBody = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-022 | Query/UUID không hợp lệ: /api/products/not-a-uuid",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products/not-a-uuid",
+            "description": "Query/UUID không hợp lệ: /api/products/not-a-uuid"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-022: HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const __livestreamBody = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-023 | Sản phẩm không tồn tại",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products/{{missing_id}}",
+            "description": "Sản phẩm không tồn tại"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-023: HTTP 404\", function () { pm.response.to.have.status(404); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"product_not_found\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-024 | Buyer không được PATCH sản phẩm seller",
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products/{{product_id}}",
+            "description": "Buyer không được PATCH sản phẩm seller",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Hijack\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"product_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-024: HTTP 403\", function () { pm.response.to.have.status(403); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"forbidden\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-025 | Buyer không được POST sản phẩm seller",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products/{{product_id}}/stock",
+            "description": "Buyer không được POST sản phẩm seller",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity_delta\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"product_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-025: HTTP 403\", function () { pm.response.to.have.status(403); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"forbidden\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-026 | Buyer không được DELETE sản phẩm seller",
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products/{{product_id}}",
+            "description": "Buyer không được DELETE sản phẩm seller"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"product_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-026: HTTP 403\", function () { pm.response.to.have.status(403); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"forbidden\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-027 | PATCH lưu giá 0 và xóa ảnh/mô tả",
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products/{{disposable_product_id}}",
+            "description": "PATCH lưu giá 0 và xóa ảnh/mô tả",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"PM_edited_{{run_id}}\",\n  \"price\": 0,\n  \"image_url\": \"\",\n  \"description\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"disposable_product_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-027: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"price \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"price\"]).to.eql(0));",
+                  "pm.test(\"description \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"description\"]).to.eql(\"\"));",
+                  "pm.test(\"image_url \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"image_url\"]).to.eql(\"\"));",
+                  "pm.test(\"stock_quantity \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"stock_quantity\"]).to.eql(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-028 | PATCH bị từ chối: {}",
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products/{{disposable_product_id}}",
+            "description": "PATCH bị từ chối: {}",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"disposable_product_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-028: HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const __livestreamBody = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-029 | PATCH bị từ chối: {\"stock_quantity\": 9999}",
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products/{{disposable_product_id}}",
+            "description": "PATCH bị từ chối: {\"stock_quantity\": 9999}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stock_quantity\": 9999\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"disposable_product_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-029: HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const __livestreamBody = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-030 | PATCH bị từ chối: {\"seller_id\": \"{{buyer_id}}\"}",
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products/{{disposable_product_id}}",
+            "description": "PATCH bị từ chối: {\"seller_id\": \"{{buyer_id}}\"}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"seller_id\": \"{{buyer_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"disposable_product_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-030: HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const __livestreamBody = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-031 | PATCH bị từ chối: {\"name\": \"  \"}",
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products/{{disposable_product_id}}",
+            "description": "PATCH bị từ chối: {\"name\": \"  \"}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"  \"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"disposable_product_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-031: HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const __livestreamBody = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-032 | PATCH bị từ chối: {\"price\": 1.001}",
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products/{{disposable_product_id}}",
+            "description": "PATCH bị từ chối: {\"price\": 1.001}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"price\": 1.001\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"disposable_product_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-032: HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const __livestreamBody = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-033 | Create input sai: {\"name\": \"X\", \"price\": -1, \"stock_quantity\": 1}",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products",
+            "description": "Create input sai: {\"name\": \"X\", \"price\": -1, \"stock_quantity\": 1}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"X\",\n  \"price\": -1,\n  \"stock_quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-033: HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const __livestreamBody = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-034 | Create input sai: {\"name\": \"X\", \"price\": 100000000, \"stock_quantity\": 1}",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products",
+            "description": "Create input sai: {\"name\": \"X\", \"price\": 100000000, \"stock_quantity\": 1}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"X\",\n  \"price\": 100000000,\n  \"stock_quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-034: HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const __livestreamBody = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-035 | Create input sai: {\"name\": \"X\", \"price\": 1, \"stock_quantity\": -1}",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products",
+            "description": "Create input sai: {\"name\": \"X\", \"price\": 1, \"stock_quantity\": -1}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"X\",\n  \"price\": 1,\n  \"stock_quantity\": -1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-035: HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const __livestreamBody = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-036 | Create input sai: {\"name\": \"X\", \"stock_quantity\": 1}",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products",
+            "description": "Create input sai: {\"name\": \"X\", \"stock_quantity\": 1}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"X\",\n  \"stock_quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-036: HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const __livestreamBody = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-037 | Điều chỉnh kho 5",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products/{{product_id}}/stock",
+            "description": "Điều chỉnh kho 5",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity_delta\": 5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"product_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-037: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"stock_quantity \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"stock_quantity\"]).to.eql(35));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-038 | Điều chỉnh kho -2",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products/{{product_id}}/stock",
+            "description": "Điều chỉnh kho -2",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity_delta\": -2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"product_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-038: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"stock_quantity \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"stock_quantity\"]).to.eql(33));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-039 | Điều chỉnh kho -1000",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products/{{product_id}}/stock",
+            "description": "Điều chỉnh kho -1000",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity_delta\": -1000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"product_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-039: HTTP 409\", function () { pm.response.to.have.status(409); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"insufficient_stock\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-040 | Điều chỉnh kho 0",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products/{{product_id}}/stock",
+            "description": "Điều chỉnh kho 0",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quantity_delta\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"product_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-040: HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"invalid_quantity\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-041 | Xóa sản phẩm chưa được dùng",
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products/{{disposable_product_id}}",
+            "description": "Xóa sản phẩm chưa được dùng"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"disposable_product_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-041: HTTP 204\", function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-042 | Sản phẩm đã xóa trả 404",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products/{{disposable_product_id}}",
+            "description": "Sản phẩm đã xóa trả 404"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"disposable_product_id\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-042: HTTP 404\", function () { pm.response.to.have.status(404); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"product_not_found\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-043 | Đơn input sai / thiếu kho / không có sản phẩm",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/orders",
+            "description": "Đơn input sai / thiếu kho / không có sản phẩm",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"quantity\": -1,\n  \"payment_method\": \"manual\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"product_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-043: HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const __livestreamBody = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-044 | Đơn input sai / thiếu kho / không có sản phẩm",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/orders",
+            "description": "Đơn input sai / thiếu kho / không có sản phẩm",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"quantity\": 99999,\n  \"payment_method\": \"manual\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"product_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-044: HTTP 409\", function () { pm.response.to.have.status(409); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"insufficient_stock\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-045 | Đơn input sai / thiếu kho / không có sản phẩm",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/orders",
+            "description": "Đơn input sai / thiếu kho / không có sản phẩm",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{missing_id}}\",\n  \"quantity\": 1,\n  \"payment_method\": \"manual\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"product_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-045: HTTP 404\", function () { pm.response.to.have.status(404); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"product_not_found\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-046 | Buyer mua 2 sản phẩm",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/orders",
+            "description": "Buyer mua 2 sản phẩm",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"quantity\": 2,\n  \"payment_method\": \"manual\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"product_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-046: HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"total_amount \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"total_amount\"]).to.eql(200000));",
+                  "pm.test(\"status \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"status\"]).to.eql(\"pending\"));",
+                  "if (pm.response.code === 201) {",
+                  "  pm.environment.set(\"order_id\", __livestreamBody.order_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-047 | Kho giảm còn 31 sau đặt hàng",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products/{{product_id}}",
+            "description": "Kho giảm còn 31 sau đặt hàng"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"product_id\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-047: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"stock_quantity \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"stock_quantity\"]).to.eql(31));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-048 | Seller không được pay đơn buyer",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/orders/{{order_id}}/pay",
+            "description": "Seller không được pay đơn buyer",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payment_method\": \"manual\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"order_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-048: HTTP 404\", function () { pm.response.to.have.status(404); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"order_not_found\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-049 | Seller không được cancel đơn buyer",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{base_url}}/api/orders/{{order_id}}/cancel",
+            "description": "Seller không được cancel đơn buyer"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"order_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-049: HTTP 404\", function () { pm.response.to.have.status(404); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"order_not_found\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-050 | Seller không được refund đơn buyer",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/orders/{{order_id}}/refund",
+            "description": "Seller không được refund đơn buyer",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refund_reason\": \"Foreign order\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"order_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-050: HTTP 404\", function () { pm.response.to.have.status(404); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"order_not_found\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-051 | Không hoàn đơn chưa thanh toán",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/orders/{{order_id}}/refund",
+            "description": "Không hoàn đơn chưa thanh toán",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refund_reason\": \"Not paid\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"order_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-051: HTTP 409\", function () { pm.response.to.have.status(409); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"order_not_paid\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-052 | Không xóa sản phẩm đang có đơn",
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products/{{product_id}}",
+            "description": "Không xóa sản phẩm đang có đơn"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"product_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-052: HTTP 409\", function () { pm.response.to.have.status(409); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"product_in_use\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-053 | Thanh toán nội bộ đơn buyer",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/orders/{{order_id}}/pay",
+            "description": "Thanh toán nội bộ đơn buyer",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payment_method\": \"manual\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"order_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-053: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"status \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"status\"]).to.eql(\"paid\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-054 | Không thanh toán lặp",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/orders/{{order_id}}/pay",
+            "description": "Không thanh toán lặp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payment_method\": \"manual\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"order_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-054: HTTP 409\", function () { pm.response.to.have.status(409); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"order_not_pending\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-055 | Không cancel đơn đã paid",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{base_url}}/api/orders/{{order_id}}/cancel",
+            "description": "Không cancel đơn đã paid"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"order_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-055: HTTP 409\", function () { pm.response.to.have.status(409); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"order_not_pending\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-056 | Hoàn đơn paid",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/orders/{{order_id}}/refund",
+            "description": "Hoàn đơn paid",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refund_reason\": \"Postman regression refund\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"order_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-056: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"status \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"status\"]).to.eql(\"refunded\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-057 | Không hoàn đơn lặp",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/orders/{{order_id}}/refund",
+            "description": "Không hoàn đơn lặp",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refund_reason\": \"Retry\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"order_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-057: HTTP 409\", function () { pm.response.to.have.status(409); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"order_not_paid\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-058 | Hoàn đơn trả kho về 33",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products/{{product_id}}",
+            "description": "Hoàn đơn trả kho về 33"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"product_id\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-058: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"stock_quantity \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"stock_quantity\"]).to.eql(33));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-059 | Tạo đơn thứ hai để cancel",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/orders",
+            "description": "Tạo đơn thứ hai để cancel",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"quantity\": 3,\n  \"payment_method\": \"manual\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"product_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-059: HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"total_amount \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"total_amount\"]).to.eql(300000));",
+                  "if (pm.response.code === 201) {",
+                  "  pm.environment.set(\"cancel_order_id\", __livestreamBody.order_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-060 | Cancel đơn pending",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{base_url}}/api/orders/{{cancel_order_id}}/cancel",
+            "description": "Cancel đơn pending"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"cancel_order_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-060: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"status \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"status\"]).to.eql(\"cancelled\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-061 | Không cancel lặp",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{base_url}}/api/orders/{{cancel_order_id}}/cancel",
+            "description": "Không cancel lặp"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"cancel_order_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-061: HTTP 409\", function () { pm.response.to.have.status(409); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"order_not_pending\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-062 | Không trả tiền đơn cancelled",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/orders/{{cancel_order_id}}/pay",
+            "description": "Không trả tiền đơn cancelled",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payment_method\": \"manual\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"cancel_order_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-062: HTTP 409\", function () { pm.response.to.have.status(409); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"order_not_pending\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-063 | Kho sau cancel vẫn là 33",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products/{{product_id}}",
+            "description": "Kho sau cancel vẫn là 33"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"product_id\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-063: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"stock_quantity \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"stock_quantity\"]).to.eql(33));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-064 | Giữ sản phẩm có lịch sử đơn đã hoàn/hủy",
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products/{{product_id}}",
+            "description": "Giữ sản phẩm có lịch sử đơn đã hoàn/hủy"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"product_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-064: HTTP 409\", function () { pm.response.to.have.status(409); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"product_in_use\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-065 | Update profile buyer",
+          "request": {
+            "method": "PUT",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/me",
+            "description": "Update profile buyer",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullname\": \"Postman Buyer\",\n  \"avatar\": \"/uploads/test.png\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-065: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"status \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"status\"]).to.eql(\"success\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTO-066 | Dọn sản phẩm buyer chưa dùng",
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products/{{buyer_product_id}}",
+            "description": "Dọn sản phẩm buyer chưa dùng"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"buyer_product_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTO-066: HTTP 204\", function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 - Avatar (chon file)",
+      "description": "Chọn file trong fixtures hoặc đặt Working directory là thư mục giải nén. Có thể chạy nguyên folder sau folder 02.",
+      "item": [
+        {
+          "name": "FILE-001 | Upload avatar PNG",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{base_url}}/api/users/me/avatar",
+            "description": "Upload avatar PNG",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "fixtures/avatar.png"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"FILE-001: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"URL uploads\",()=>pm.expect(__livestreamBody.url).to.match(/^\\/uploads\\/.+\\.png$/));",
+                  "if (pm.response.code === 200) {",
+                  "  pm.environment.set(\"avatar_url\", __livestreamBody.url);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "FILE-002 | Tải lại avatar vừa upload",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{base_url}}{{avatar_url}}",
+            "description": "Tải lại avatar vừa upload"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"avatar_url\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"FILE-002: HTTP 200\",()=>pm.response.to.have.status(200)); pm.test(\"Ảnh PNG\",()=>pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"image/png\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "FILE-003 | Không nhận avatar TXT",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{base_url}}/api/users/me/avatar",
+            "description": "Không nhận avatar TXT",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "fixtures/invalid-avatar.txt"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"FILE-003: HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"Invalid avatar image format\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "FILE-004 | Thiếu file avatar",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{base_url}}/api/users/me/avatar",
+            "description": "Thiếu file avatar",
+            "body": {
+              "mode": "formdata",
+              "formdata": []
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"FILE-004: HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const __livestreamBody = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 - San pham live (can live_id)",
+      "description": "Dùng WebSocket seller gửi create_live, copy id vào live_id trước khi chạy. Không dùng product_id của folder 02; folder này tự tạo sản phẩm riêng.",
+      "item": [
+        {
+          "name": "LIVE-001 | Tạo sản phẩm riêng cho live",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products",
+            "description": "Tạo sản phẩm riêng cho live",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"PM_live_{{run_id}}\",\n  \"price\": 100000,\n  \"stock_quantity\": 20\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"live_id\", \"run_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"LIVE-001: HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "",
+                  "if (pm.response.code === 201) {",
+                  "  pm.environment.set(\"live_product_id\", __livestreamBody.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "LIVE-002 | Tạo sản phẩm buyer để thử gắn trái quyền",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/products",
+            "description": "Tạo sản phẩm buyer để thử gắn trái quyền",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"PM_foreign_live_{{run_id}}\",\n  \"price\": 10000,\n  \"stock_quantity\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"LIVE-002: HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "",
+                  "if (pm.response.code === 201) {",
+                  "  pm.environment.set(\"live_foreign_product_id\", __livestreamBody.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "LIVE-003 | Buyer không được gắn sản phẩm vào live seller",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/livestreams/{{live_id}}/products",
+            "description": "Buyer không được gắn sản phẩm vào live seller",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{live_product_id}}\",\n  \"discount_price\": 80000,\n  \"stock_quantity\": 10,\n  \"is_pinned\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"live_id\", \"live_product_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"LIVE-003: HTTP 403\", function () { pm.response.to.have.status(403); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"forbidden\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "LIVE-004 | Seller không được gắn sản phẩm buyer",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/livestreams/{{live_id}}/products",
+            "description": "Seller không được gắn sản phẩm buyer",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{live_foreign_product_id}}\",\n  \"discount_price\": 80000,\n  \"stock_quantity\": 1,\n  \"is_pinned\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"live_id\", \"live_foreign_product_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"LIVE-004: HTTP 403\", function () { pm.response.to.have.status(403); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"forbidden\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "LIVE-005 | Gắn sản phẩm và cấp 10 đơn vị kho cho live",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/livestreams/{{live_id}}/products",
+            "description": "Gắn sản phẩm và cấp 10 đơn vị kho cho live",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{live_product_id}}\",\n  \"discount_price\": 80000,\n  \"stock_quantity\": 10,\n  \"is_pinned\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"live_id\", \"live_product_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"LIVE-005: HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const __livestreamBody = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "LIVE-006 | Kho gốc còn 10 sau cấp kho live",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products/{{live_product_id}}",
+            "description": "Kho gốc còn 10 sau cấp kho live"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"live_product_id\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"LIVE-006: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"stock_quantity \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"stock_quantity\"]).to.eql(10));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "LIVE-007 | Không gắn trùng sản phẩm",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/livestreams/{{live_id}}/products",
+            "description": "Không gắn trùng sản phẩm",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{live_product_id}}\",\n  \"discount_price\": 80000,\n  \"stock_quantity\": 10,\n  \"is_pinned\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"live_id\", \"live_product_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"LIVE-007: HTTP 409\", function () { pm.response.to.have.status(409); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"product_already_in_livestream\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "LIVE-008 | Không xóa sản phẩm gốc đang trong live",
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products/{{live_product_id}}",
+            "description": "Không xóa sản phẩm gốc đang trong live"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"live_product_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"LIVE-008: HTTP 409\", function () { pm.response.to.have.status(409); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"product_in_use\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "LIVE-009 | Mua live 2 sản phẩm theo giá 80000",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/orders",
+            "description": "Mua live 2 sản phẩm theo giá 80000",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{live_product_id}}\",\n  \"quantity\": 2,\n  \"livestream_id\": \"{{live_id}}\",\n  \"payment_method\": \"manual\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"live_id\", \"live_product_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"LIVE-009: HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"total_amount \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"total_amount\"]).to.eql(160000));",
+                  "if (pm.response.code === 201) {",
+                  "  pm.environment.set(\"live_order_id\", __livestreamBody.order_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "LIVE-010 | Không gỡ sản phẩm còn đơn pending",
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{base_url}}/api/livestreams/{{live_id}}/products/{{live_product_id}}",
+            "description": "Không gỡ sản phẩm còn đơn pending"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"live_id\", \"live_product_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"LIVE-010: HTTP 409\", function () { pm.response.to.have.status(409); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"product_has_active_orders\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "LIVE-011 | Cancel đơn live trả lại phần kho live",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{base_url}}/api/orders/{{live_order_id}}/cancel",
+            "description": "Cancel đơn live trả lại phần kho live"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"live_order_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"LIVE-011: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"status \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"status\"]).to.eql(\"cancelled\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "LIVE-012 | Tạo đơn live thứ hai để pay/refund",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/orders",
+            "description": "Tạo đơn live thứ hai để pay/refund",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{live_product_id}}\",\n  \"quantity\": 3,\n  \"livestream_id\": \"{{live_id}}\",\n  \"payment_method\": \"manual\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"live_id\", \"live_product_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"LIVE-012: HTTP 201\", function () { pm.response.to.have.status(201); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"total_amount \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"total_amount\"]).to.eql(240000));",
+                  "if (pm.response.code === 201) {",
+                  "  pm.environment.set(\"live_paid_order_id\", __livestreamBody.order_id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "LIVE-013 | Pay đơn live",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/orders/{{live_paid_order_id}}/pay",
+            "description": "Pay đơn live",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payment_method\": \"manual\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"live_paid_order_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"LIVE-013: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"status \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"status\"]).to.eql(\"paid\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "LIVE-014 | Refund đơn live",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/orders/{{live_paid_order_id}}/refund",
+            "description": "Refund đơn live",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refund_reason\": \"Postman live refund\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"live_paid_order_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"LIVE-014: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"status \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"status\"]).to.eql(\"refunded\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "LIVE-015 | Buyer không được gỡ sản phẩm live seller",
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{base_url}}/api/livestreams/{{live_id}}/products/{{live_product_id}}",
+            "description": "Buyer không được gỡ sản phẩm live seller"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"live_id\", \"live_product_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"LIVE-015: HTTP 403\", function () { pm.response.to.have.status(403); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"forbidden\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "LIVE-016 | Gỡ sản phẩm, trả kho chưa bán về kho gốc",
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{base_url}}/api/livestreams/{{live_id}}/products/{{live_product_id}}",
+            "description": "Gỡ sản phẩm, trả kho chưa bán về kho gốc"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"live_id\", \"live_product_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"LIVE-016: HTTP 204\", function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "LIVE-017 | Kho gốc trở lại 20 sau gỡ live",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products/{{live_product_id}}",
+            "description": "Kho gốc trở lại 20 sau gỡ live"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"live_product_id\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"LIVE-017: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"stock_quantity \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"stock_quantity\"]).to.eql(20));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "LIVE-018 | Dọn sản phẩm buyer dùng thử quyền",
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{base_url}}/api/products/{{live_foreign_product_id}}",
+            "description": "Dọn sản phẩm buyer dùng thử quyền"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"live_foreign_product_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"LIVE-018: HTTP 204\", function () { pm.response.to.have.status(204); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 - Live da ket thuc (can ended_live_id)",
+      "description": "Sau folder 04, end_live bằng WebSocket seller; copy ID đó vào ended_live_id. Chạy folder này để kiểm tra HTTP bị chặn đúng trạng thái.",
+      "item": [
+        {
+          "name": "END-001 | Không thêm sản phẩm vào live đã kết thúc",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/livestreams/{{ended_live_id}}/products",
+            "description": "Không thêm sản phẩm vào live đã kết thúc",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{live_product_id}}\",\n  \"discount_price\": 80000,\n  \"stock_quantity\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"ended_live_id\", \"live_product_id\", \"seller_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"END-001: HTTP 409\", function () { pm.response.to.have.status(409); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"livestream_not_active\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "END-002 | Không đặt hàng live đã kết thúc",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{buyer_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/orders",
+            "description": "Không đặt hàng live đã kết thúc",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{live_product_id}}\",\n  \"livestream_id\": \"{{ended_live_id}}\",\n  \"quantity\": 1,\n  \"payment_method\": \"manual\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"ended_live_id\", \"live_product_id\", \"buyer_token\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"END-002: HTTP 409\", function () { pm.response.to.have.status(409); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"livestream_not_active\"); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 - Reset mat khau (THU CONG)",
+      "description": "Chạy từng request trên tài khoản test buyer. Sau khi nhận OTP email, mở Body của RESET-002 và nhập vào code đang để trống. Đặt buyer_new_password trong Environment. Request thành công cập nhật buyer_password. Không Run nguyên folder khi chưa chuẩn bị OTP.",
+      "item": [
+        {
+          "name": "RESET-001 | Yêu cầu OTP reset (dừng Runner chờ OTP)",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/password/reset-request",
+            "description": "Yêu cầu OTP reset (dừng Runner chờ OTP)",
+            "body": {
+              "mode": "raw",
+              "raw": "{{email_body}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"buyer_email\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "pm.variables.set(\"email_body\",JSON.stringify({email:pm.environment.get(\"buyer_email\")}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"RESET-001: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "if (pm.response.code === 200) { console.info(\"Lượt chạy đã dừng để nhập OTP. Mở Body của Verify, nhập mã email và Save. Bắt đầu lượt Run mới từ Verify, bỏ chọn Register đã chạy; hoặc gửi Verify bằng nút Send.\"); pm.execution.setNextRequest(null); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RESET-002 | Nhập OTP trong Body để xác nhận reset",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/password/reset",
+            "description": "Nhập trực tiếp OTP email vào trường code trong Body. Đặt buyer_new_password trong Environment. Script giữ nguyên OTP bạn nhập; sau thành công mới cập nhật mật khẩu và lưu mã đã dùng để kiểm tra chống dùng lại.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{buyer_email}}\",\n  \"code\": \"\",\n  \"new_password\": \"{{buyer_new_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"buyer_email\", \"buyer_new_password\", \"buyer_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "const resetInput = JSON.parse(pm.request.body.raw); if (typeof resetInput.code !== \"string\" || !/^\\d{6}$/.test(resetInput.code)) throw new Error(\"Nhập OTP reset 6 số vào Body > raw > JSON, trường code, rồi bấm Send.\"); resetInput.email=pm.environment.get(\"buyer_email\"); resetInput.new_password=pm.environment.get(\"buyer_new_password\"); pm.request.body.update(JSON.stringify(resetInput));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"RESET-002: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "if(pm.response.code===200){const submitted=JSON.parse(pm.request.body.raw);pm.environment.set(\"buyer_used_reset_code\",submitted.code);pm.environment.set(\"buyer_previous_password\",pm.environment.get(\"buyer_password\"));pm.environment.set(\"buyer_password\",submitted.new_password);}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RESET-003 | Login buyer (mật khẩu cũ)",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/login",
+            "description": "Login buyer (mật khẩu cũ)",
+            "body": {
+              "mode": "raw",
+              "raw": "{{auth_body}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"buyer_email\", \"buyer_previous_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "pm.variables.set(\"auth_body\", JSON.stringify({email: pm.environment.get(\"buyer_email\"), password: pm.environment.get(\"buyer_previous_password\")}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"RESET-003: HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const __livestreamBody = pm.response.json();"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RESET-004 | Login buyer",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/login",
+            "description": "Login buyer",
+            "body": {
+              "mode": "raw",
+              "raw": "{{auth_body}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"buyer_email\", \"buyer_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "pm.variables.set(\"auth_body\", JSON.stringify({email: pm.environment.get(\"buyer_email\"), password: pm.environment.get(\"buyer_password\")}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"RESET-004: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Có JWT\", () => pm.expect(__livestreamBody.token).to.be.a(\"string\").and.not.empty);",
+                  "if (pm.response.code === 200) { const claims = JSON.parse(require(\"buffer\").Buffer.from(__livestreamBody.token.split(\".\")[1], \"base64\").toString(\"utf8\")); pm.environment.set(\"buyer_id\", claims.user_id); }",
+                  "pm.test(\"Buyer khác seller\", () => pm.expect(pm.environment.get(\"buyer_id\")).not.to.eql(pm.environment.get(\"seller_id\")));",
+                  "if (pm.response.code === 200) {",
+                  "  pm.environment.set(\"buyer_token\", __livestreamBody.token);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RESET-005 | OTP đã dùng không được dùng lại",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/password/reset",
+            "description": "OTP đã dùng không được dùng lại",
+            "body": {
+              "mode": "raw",
+              "raw": "{{reset_body}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"buyer_email\", \"buyer_used_reset_code\", \"buyer_new_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "pm.variables.set(\"reset_body\",JSON.stringify({email:pm.environment.get(\"buyer_email\"),code:pm.environment.get(\"buyer_used_reset_code\"),new_password:pm.environment.get(\"buyer_new_password\")}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"RESET-005: HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"otp_expired\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RESET-006 | Email không có tài khoản",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/password/reset-request",
+            "description": "Email không có tài khoản",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"missing-{{$randomUUID}}@example.invalid\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"RESET-006: HTTP 404\", function () { pm.response.to.have.status(404); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"user_not_found\"); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "RESET-007 | Brevo chưa cấu hình trả lỗi rõ ràng",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/password/reset-request",
+            "description": "Chỉ chạy khi BREVO_API_KEY/FROM_EMAIL chưa cấu hình. Không chạy case này trước xác nhận OTP của case RESET-002 vì request mới sẽ phát hành mã mới.",
+            "body": {
+              "mode": "raw",
+              "raw": "{{email_body}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"buyer_email\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "pm.variables.set(\"email_body\",JSON.stringify({email:pm.environment.get(\"buyer_email\")}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"RESET-007: HTTP 502\", function () { pm.response.to.have.status(502); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"email_delivery_failed\"); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 - Negative auth (CHUA verify)",
+      "description": "Case âm độc lập, không thuộc luồng đăng ký/verify/login chính. Điền unverified_email mới và unverified_password; đăng ký tài khoản riêng rồi cố ý không verify. Không dùng seller/buyer đã xác thực ở folder 01.",
+      "item": [
+        {
+          "name": "NEG-001 | Tạo tài khoản riêng và cố ý chưa verify",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/register",
+            "description": "Dùng email test mới. Không gửi Verify cho tài khoản này; tài khoản được tạo chỉ để kiểm tra từ chối đăng nhập khi chưa xác thực.",
+            "body": {
+              "mode": "raw",
+              "raw": "{{unverified_body}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"unverified_email\", \"unverified_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "pm.variables.set(\"unverified_body\", JSON.stringify({username: \"pm_unverified_\" + pm.variables.replaceIn(\"{{$randomUUID}}\"), email: pm.environment.get(\"unverified_email\"), password: pm.environment.get(\"unverified_password\")}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"NEG-001: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"status \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"status\"]).to.eql(\"success\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "NEG-002 | Case âm: chưa verify phải bị từ chối đăng nhập",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/login",
+            "description": "Kỳ vọng thất bại 400 là kết quả đúng của case âm. Luồng chính luôn verify thành công trước khi login.",
+            "body": {
+              "mode": "raw",
+              "raw": "{{auth_body}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"unverified_email\", \"unverified_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "pm.variables.set(\"auth_body\", JSON.stringify({email: pm.environment.get(\"unverified_email\"), password: pm.environment.get(\"unverified_password\")}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"NEG-002: HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"User not verified\"); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const base = pm.environment.get(\"base_url\"); if (!base) throw new Error(\"Chọn Environment và đặt base_url\"); pm.environment.set(\"ws_url\",base.replace(/^http/,\"ws\").replace(/\\/$/,\"\"));"
+        ]
+      }
+    }
+  ]
+}

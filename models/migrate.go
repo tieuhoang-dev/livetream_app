@@ -7,6 +7,9 @@ import (
 )
 
 func MigrateAll(db *gorm.DB) {
+	if err := migrateLivestreamProductReference(db); err != nil {
+		log.Fatalf("MySQL livestream product migration failed: %v", err)
+	}
 	err := db.AutoMigrate(
 		&User{},
 		&Wallet{},

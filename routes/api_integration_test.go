@@ -434,7 +434,7 @@ func TestConnectedAPI(t *testing.T) {
 		call(t, seller.ID, "DELETE", "/api/products/"+p.ID, nil, 409)
 		call(t, seller.ID, "PATCH", "/api/products/"+p.ID, gin.H{"price": 110, "name": "Updated catalog name"}, 200)
 		var attached models.LivestreamProduct
-		db.First(&attached, "livestream_id = ? AND product_code = ?", liveID, p.ID)
+		db.First(&attached, "livestream_id = ? AND product_id = ?", liveID, p.ID)
 		if attached.ProductName != p.Name || attached.ProductImage != p.ImageURL || attached.Description != p.Description || !attached.IsPinned {
 			t.Fatal("live product metadata was not copied")
 		}
