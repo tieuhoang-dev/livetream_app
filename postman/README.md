@@ -1,8 +1,11 @@
 # Test Livestream App bằng Postman
 
 Bộ test theo `main` commit `7dc3dd0` của `tieuhoang-dev/livetream_app`.
-Gồm **103 request HTTP có assertion**, bảng test case CSV, file Environment,
+Gồm **105 request HTTP có assertion**, bảng test case CSV, file Environment,
 ảnh mẫu và hướng dẫn WebSocket riêng.
+
+Luồng chính cho tài khoản mới: **Đăng ký → lấy OTP → Verify thành công →
+Đăng nhập → gọi API có JWT**. Không đăng nhập trước bước Verify trong luồng này.
 
 ## 1. Import và cấu hình
 
@@ -12,7 +15,8 @@ Gồm **103 request HTTP có assertion**, bảng test case CSV, file Environment
 2. Chọn Environment **Livestream App - Local (dien tai khoan test)**.
 3. Đặt `base_url`, mặc định `http://localhost:8080`. Khi chạy một HTTP request,
    collection tự cập nhật `ws_url` tương ứng (`http → ws`, `https → wss`).
-4. Điền bốn biến cho **hai tài khoản test khác nhau, đã xác thực và active**:
+4. Điền bốn biến cho **hai tài khoản test khác nhau**. Tài khoản mới/chưa xác
+   thực phải hoàn tất bước 2 bên dưới trước khi chạy folder 02:
 
    | Biến | Giá trị |
    | --- | --- |
@@ -36,9 +40,17 @@ phải kết quả đo khả năng chịu tải production.
 Chạy **từng request** trong folder `01 - Setup tai khoan (THU CONG)`:
 
 1. Điền email bạn kiểm soát và password cho seller/buyer.
-2. Đăng ký seller, kiểm tra login trước xác thực trả 400.
-3. Lấy OTP từ email, điền `seller_verification_code`, rồi chạy Verify seller.
-4. Làm tương tự cho buyer với `buyer_verification_code`.
+2. `AUTH-001`: đăng ký seller, mong đợi 200.
+3. Lấy OTP từ email, điền `seller_verification_code`, chạy `AUTH-002` Verify
+   seller, mong đợi 200.
+4. Chỉ sau khi Verify thành công, chạy `AUTH-003` Login seller, mong đợi 200;
+   token và user ID được lưu tự động.
+5. Làm tương tự cho buyer: `AUTH-004` đăng ký → nhập `buyer_verification_code`
+   → `AUTH-005` Verify → `AUTH-006` Login.
+
+Folder 01 chỉ có luồng thành công; cả 6 request đều mong đợi HTTP 200. Case
+đăng nhập khi chưa verify bị chặn được tách riêng ở folder 07, dùng tài khoản
+test khác, không xen vào các bước trên.
 
 Username được tạo tự động nếu bạn chưa nhập. Nếu email đã đăng ký, register
 trả 409: dùng tài khoản khác hoặc bỏ qua đăng ký khi tài khoản đã verified.
@@ -131,7 +143,21 @@ riêng; xem bảng bổ sung trong tài liệu WebSocket. Không coi 502 là th�
 của luồng gửi email. Pay/refund trong app hiện chỉ đổi trạng thái nội bộ, không
 chứng minh đã thu hoặc hoàn tiền qua ngân hàng.
 
-## 7. Chạy bằng Newman (tùy chọn)
+## 7. Case âm: đăng nhập khi chưa verify
+
+Folder `07 - Negative auth (CHUA verify)` là bài kiểm tra lỗi độc lập, không
+phải bước trong luồng chính:
+
+1. Điền `unverified_email` mới và `unverified_password`, không dùng email
+   seller/buyer đã xác thực.
+2. `NEG-001`: đăng ký tài khoản test riêng, mong đợi 200. Cố ý không Verify
+   tài khoản này.
+3. `NEG-002`: thử login tài khoản chưa Verify, mong đợi `400 User not verified`.
+
+Không cần chạy folder 07 để sử dụng hoặc kiểm thử các API nghiệp vụ. Khi chạy
+lại folder này, dùng email test mới vì backend không có API xóa tài khoản.
+
+## 8. Chạy bằng Newman (tùy chọn)
 
 ```sh
 newman run Livestream_App.postman_collection.json \
@@ -145,5 +171,5 @@ Muốn chạy tiếp folder live/avatar bằng CLI, dùng `--export-environment`
 file xuất ở lần tiếp theo. File xuất chứa token/password của bạn, giữ riêng.
 
 `HTTP_TEST_CASES.csv` mở được bằng Excel/Google Sheets, gồm ID, điều kiện, body,
-HTTP status và mã lỗi mong đợi cho cả 103 request. `VALIDATION.md` ghi rõ những
+HTTP status và mã lỗi mong đợi cho cả 105 request. `VALIDATION.md` ghi rõ những
 folder đã chạy xác minh và các phần còn cần OTP thực.

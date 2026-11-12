@@ -3,12 +3,12 @@
     "_postman_id": "f33c42c4-5df9-4daf-aae4-301ab7c9e819",
     "name": "Livestream App - API regression",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Theo main 7dc3dd0. Đọc README trước khi chạy. Chỉ chọn folder 02 - HTTP tu dong cho Collection Runner; folder OTP/WebSocket/file cần thao tác theo hướng dẫn. Token và ID tự lưu trong Environment. Không chứa tài khoản, token hoặc API key thật."
+    "description": "Theo main 7dc3dd0. Đọc README trước khi chạy. Chỉ chọn folder 02 - HTTP tu dong cho Collection Runner; folder OTP/WebSocket/file cần thao tác theo hướng dẫn. Token và ID tự lưu trong Environment. Không chứa tài khoản, token hoặc API key thật. Luồng chính folder 01: Register → Verify thành công → Login, cho từng tài khoản. Case login trước Verify phải bị từ chối đã tách riêng vào folder 07 và dùng tài khoản khác."
   },
   "item": [
     {
       "name": "01 - Setup tai khoan (THU CONG)",
-      "description": "Chạy từng request. Đăng ký chỉ khi chưa có tài khoản. Nhập OTP email vào Environment trước Verify. Nếu đã có 2 tài khoản verified thì bỏ qua folder này.",
+      "description": "Luồng chính cho từng tài khoản: Đăng ký → nhập OTP email → Verify thành công → Login. Chạy từng request theo thứ tự. Nếu đã có 2 tài khoản verified thì bỏ qua folder này. Case đăng nhập trước verify bị chặn nằm riêng ở folder 07.",
       "item": [
         {
           "name": "AUTH-001 | Đăng ký seller",
@@ -61,56 +61,7 @@
           ]
         },
         {
-          "name": "AUTH-002 | Login seller trước xác thực bị chặn",
-          "request": {
-            "method": "POST",
-            "auth": {
-              "type": "noauth"
-            },
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{base_url}}/api/users/login",
-            "description": "Login seller trước xác thực bị chặn",
-            "body": {
-              "mode": "raw",
-              "raw": "{{auth_body}}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "for (const key of [\"seller_email\", \"seller_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
-                  "pm.variables.set(\"auth_body\", JSON.stringify({email: pm.environment.get(\"seller_email\"), password: pm.environment.get(\"seller_password\")}));"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"AUTH-002: HTTP 400\", function () { pm.response.to.have.status(400); });",
-                  "const __livestreamBody = pm.response.json();",
-                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"User not verified\"); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "AUTH-003 | Xác thực OTP seller",
+          "name": "AUTH-002 | Xác thực OTP seller",
           "request": {
             "method": "POST",
             "auth": {
@@ -150,9 +101,63 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"AUTH-003: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"AUTH-002: HTTP 200\", function () { pm.response.to.have.status(200); });",
                   "const __livestreamBody = pm.response.json();",
                   "pm.test(\"status \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"status\"]).to.eql(\"success\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTH-003 | Login seller",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/login",
+            "description": "Login seller",
+            "body": {
+              "mode": "raw",
+              "raw": "{{auth_body}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"seller_email\", \"seller_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "pm.variables.set(\"auth_body\", JSON.stringify({email: pm.environment.get(\"seller_email\"), password: pm.environment.get(\"seller_password\")}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTH-003: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Có JWT\", () => pm.expect(__livestreamBody.token).to.be.a(\"string\").and.not.empty);",
+                  "if (pm.response.code === 200) { const claims = JSON.parse(require(\"buffer\").Buffer.from(__livestreamBody.token.split(\".\")[1], \"base64\").toString(\"utf8\")); pm.environment.set(\"seller_id\", claims.user_id); }",
+                  "",
+                  "if (pm.response.code === 200) {",
+                  "  pm.environment.set(\"seller_token\", __livestreamBody.token);",
+                  "}"
                 ]
               }
             }
@@ -209,56 +214,7 @@
           ]
         },
         {
-          "name": "AUTH-005 | Login buyer trước xác thực bị chặn",
-          "request": {
-            "method": "POST",
-            "auth": {
-              "type": "noauth"
-            },
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": "{{base_url}}/api/users/login",
-            "description": "Login buyer trước xác thực bị chặn",
-            "body": {
-              "mode": "raw",
-              "raw": "{{auth_body}}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "for (const key of [\"buyer_email\", \"buyer_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
-                  "pm.variables.set(\"auth_body\", JSON.stringify({email: pm.environment.get(\"buyer_email\"), password: pm.environment.get(\"buyer_password\")}));"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"AUTH-005: HTTP 400\", function () { pm.response.to.have.status(400); });",
-                  "const __livestreamBody = pm.response.json();",
-                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"User not verified\"); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "AUTH-006 | Xác thực OTP buyer",
+          "name": "AUTH-005 | Xác thực OTP buyer",
           "request": {
             "method": "POST",
             "auth": {
@@ -298,9 +254,63 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"AUTH-006: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"AUTH-005: HTTP 200\", function () { pm.response.to.have.status(200); });",
                   "const __livestreamBody = pm.response.json();",
                   "pm.test(\"status \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"status\"]).to.eql(\"success\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "AUTH-006 | Login buyer",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/login",
+            "description": "Login buyer",
+            "body": {
+              "mode": "raw",
+              "raw": "{{auth_body}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"buyer_email\", \"buyer_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "pm.variables.set(\"auth_body\", JSON.stringify({email: pm.environment.get(\"buyer_email\"), password: pm.environment.get(\"buyer_password\")}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"AUTH-006: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Có JWT\", () => pm.expect(__livestreamBody.token).to.be.a(\"string\").and.not.empty);",
+                  "if (pm.response.code === 200) { const claims = JSON.parse(require(\"buffer\").Buffer.from(__livestreamBody.token.split(\".\")[1], \"base64\").toString(\"utf8\")); pm.environment.set(\"buyer_id\", claims.user_id); }",
+                  "pm.test(\"Buyer khác seller\", () => pm.expect(pm.environment.get(\"buyer_id\")).not.to.eql(pm.environment.get(\"seller_id\")));",
+                  "if (pm.response.code === 200) {",
+                  "  pm.environment.set(\"buyer_token\", __livestreamBody.token);",
+                  "}"
                 ]
               }
             }
@@ -4833,6 +4843,110 @@
                   "pm.test(\"RESET-007: HTTP 502\", function () { pm.response.to.have.status(502); });",
                   "const __livestreamBody = pm.response.json();",
                   "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"email_delivery_failed\"); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 - Negative auth (CHUA verify)",
+      "description": "Case âm độc lập, không thuộc luồng đăng ký/verify/login chính. Điền unverified_email mới và unverified_password; đăng ký tài khoản riêng rồi cố ý không verify. Không dùng seller/buyer đã xác thực ở folder 01.",
+      "item": [
+        {
+          "name": "NEG-001 | Tạo tài khoản riêng và cố ý chưa verify",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/register",
+            "description": "Dùng email test mới. Không gửi Verify cho tài khoản này; tài khoản được tạo chỉ để kiểm tra từ chối đăng nhập khi chưa xác thực.",
+            "body": {
+              "mode": "raw",
+              "raw": "{{unverified_body}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"unverified_email\", \"unverified_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "pm.variables.set(\"unverified_body\", JSON.stringify({username: \"pm_unverified_\" + pm.variables.replaceIn(\"{{$randomUUID}}\"), email: pm.environment.get(\"unverified_email\"), password: pm.environment.get(\"unverified_password\")}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"NEG-001: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"status \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"status\"]).to.eql(\"success\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "NEG-002 | Case âm: chưa verify phải bị từ chối đăng nhập",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/users/login",
+            "description": "Kỳ vọng thất bại 400 là kết quả đúng của case âm. Luồng chính luôn verify thành công trước khi login.",
+            "body": {
+              "mode": "raw",
+              "raw": "{{auth_body}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "for (const key of [\"unverified_email\", \"unverified_password\"]) { if (!pm.environment.get(key)) { throw new Error(\"Thiếu biến \" + key + \". Xem README và chạy đúng thứ tự.\"); } }",
+                  "pm.variables.set(\"auth_body\", JSON.stringify({email: pm.environment.get(\"unverified_email\"), password: pm.environment.get(\"unverified_password\")}));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"NEG-002: HTTP 400\", function () { pm.response.to.have.status(400); });",
+                  "const __livestreamBody = pm.response.json();",
+                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"User not verified\"); });"
                 ]
               }
             }

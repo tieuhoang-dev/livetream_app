@@ -1,10 +1,10 @@
 ﻿id,nhom,ten,method,url,tai_khoan,dieu_kien,body,http_mong_doi,loi_mong_doi,ghi_chu,cach_chay
 AUTH-001,01 - Setup tai khoan (THU CONG),Đăng ký seller,POST,{{base_url}}/api/users/register,Không JWT,"seller_email, seller_password",{{register_body}},200,,Email phải do bạn kiểm soát và chưa đăng ký. Cần Brevo để nhận OTP. Không chạy lại request thành công này với cùng email.,Thủ công
-AUTH-002,01 - Setup tai khoan (THU CONG),Login seller trước xác thực bị chặn,POST,{{base_url}}/api/users/login,Không JWT,"seller_email, seller_password",{{auth_body}},400,User not verified,,Thủ công
-AUTH-003,01 - Setup tai khoan (THU CONG),Xác thực OTP seller,POST,{{base_url}}/api/users/verify,Không JWT,"seller_email, seller_verification_code",{{verify_body}},200,,,Thủ công
+AUTH-002,01 - Setup tai khoan (THU CONG),Xác thực OTP seller,POST,{{base_url}}/api/users/verify,Không JWT,"seller_email, seller_verification_code",{{verify_body}},200,,,Thủ công
+AUTH-003,01 - Setup tai khoan (THU CONG),Login seller,POST,{{base_url}}/api/users/login,Không JWT,"seller_email, seller_password",{{auth_body}},200,,,Thủ công
 AUTH-004,01 - Setup tai khoan (THU CONG),Đăng ký buyer,POST,{{base_url}}/api/users/register,Không JWT,"buyer_email, buyer_password",{{register_body}},200,,Email phải do bạn kiểm soát và chưa đăng ký. Cần Brevo để nhận OTP. Không chạy lại request thành công này với cùng email.,Thủ công
-AUTH-005,01 - Setup tai khoan (THU CONG),Login buyer trước xác thực bị chặn,POST,{{base_url}}/api/users/login,Không JWT,"buyer_email, buyer_password",{{auth_body}},400,User not verified,,Thủ công
-AUTH-006,01 - Setup tai khoan (THU CONG),Xác thực OTP buyer,POST,{{base_url}}/api/users/verify,Không JWT,"buyer_email, buyer_verification_code",{{verify_body}},200,,,Thủ công
+AUTH-005,01 - Setup tai khoan (THU CONG),Xác thực OTP buyer,POST,{{base_url}}/api/users/verify,Không JWT,"buyer_email, buyer_verification_code",{{verify_body}},200,,,Thủ công
+AUTH-006,01 - Setup tai khoan (THU CONG),Login buyer,POST,{{base_url}}/api/users/login,Không JWT,"buyer_email, buyer_password",{{auth_body}},200,,,Thủ công
 AUTO-001,02 - HTTP tu dong,Login seller,POST,{{base_url}}/api/users/login,Không JWT,"seller_email, seller_password",{{auth_body}},200,,,Tự động
 AUTO-002,02 - HTTP tu dong,Login buyer,POST,{{base_url}}/api/users/login,Không JWT,"buyer_email, buyer_password",{{auth_body}},200,,,Tự động
 AUTO-003,02 - HTTP tu dong,WebSocket thiếu JWT,GET,{{base_url}}/api/auth/ws,Không JWT,,,401,Authorization token missing,,Tự động
@@ -102,3 +102,5 @@ RESET-004,06 - Reset mat khau (THU CONG),Login buyer,POST,{{base_url}}/api/users
 RESET-005,06 - Reset mat khau (THU CONG),OTP đã dùng không được dùng lại,POST,{{base_url}}/api/users/password/reset,Không JWT,"buyer_email, buyer_reset_code, buyer_new_password",{{reset_body}},400,otp_expired,,Thủ công
 RESET-006,06 - Reset mat khau (THU CONG),Email không có tài khoản,POST,{{base_url}}/api/users/password/reset-request,Không JWT,,"{""email"": ""missing-{{$randomUUID}}@example.invalid""}",404,user_not_found,,Thủ công
 RESET-007,06 - Reset mat khau (THU CONG),Brevo chưa cấu hình trả lỗi rõ ràng,POST,{{base_url}}/api/users/password/reset-request,Không JWT,buyer_email,{{email_body}},502,email_delivery_failed,Chỉ chạy khi BREVO_API_KEY/FROM_EMAIL chưa cấu hình. Không chạy case này trước xác nhận OTP của case RESET-002 vì request mới sẽ phát hành mã mới.,Thủ công
+NEG-001,07 - Negative auth (CHUA verify),Tạo tài khoản riêng và cố ý chưa verify,POST,{{base_url}}/api/users/register,Không JWT,"unverified_email, unverified_password",{{unverified_body}},200,,Dùng email test mới. Không gửi Verify cho tài khoản này; tài khoản được tạo chỉ để kiểm tra từ chối đăng nhập khi chưa xác thực.,Thủ công
+NEG-002,07 - Negative auth (CHUA verify),Case âm: chưa verify phải bị từ chối đăng nhập,POST,{{base_url}}/api/users/login,Không JWT,"unverified_email, unverified_password",{{auth_body}},400,User not verified,Kỳ vọng thất bại 400 là kết quả đúng của case âm. Luồng chính luôn verify thành công trước khi login.,Thủ công
