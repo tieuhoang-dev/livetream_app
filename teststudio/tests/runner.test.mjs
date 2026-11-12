@@ -191,3 +191,29 @@ test('AUTH-001 keeps its real JSON body on a network failure and never auto-retr
   assert.match(report.results[0].error, /POST http:\/\/localhost:8080\/api\/users\/register/);
   assert.ok(!JSON.stringify(report).includes(config.seller_password));
 });
+
+for (const useDefault of [true, false]) {
+  test(`preserves browser fetch receiver through Register, Verify and Login (${useDefault ? 'default' : 'injected'} fetch)`, async t => {
+    const backend = await fakeBackend(t);
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    function receiverCheckedFetch(...args) {
+      if (this !== globalThis) throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+      fetchCalls++;
+      return Reflect.apply(originalFetch, globalThis, args);
+    }
+    const options = {workerFactory, requestInput: async input => {
+      assert.equal(input.kind, 'otp'); return {code: '012345'};
+    }};
+    if (useDefault) {
+      globalThis.fetch = receiverCheckedFetch;
+      t.after(() => { globalThis.fetch = originalFetch; });
+    } else options.fetchImpl = receiverCheckedFetch;
+    const runner = new TestRunner(onboarding, options);
+    const report = await runner.start({...config, base_url: backend.base_url}, [onboarding.item[0].name]);
+    assert.equal(report.passed, 3, JSON.stringify(report));
+    assert.equal(report.failed, 0);
+    assert.equal(fetchCalls, 3);
+    assert.deepEqual(backend.calls.map(c => c.path), ['/api/users/register', '/api/users/verify', '/api/users/login']);
+  });
+}

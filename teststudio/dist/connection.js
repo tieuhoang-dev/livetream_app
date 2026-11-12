@@ -10,6 +10,7 @@ export function normalizeBackendUrl(value) {
 }
 
 export function transportMessage(error, method, url) {
+  if (/Illegal invocation/i.test(error.message || '')) return `${method} ${url}: lỗi gọi fetch của Studio (Illegal invocation); request chưa được gửi. Cập nhật giao diện rồi chạy lại bước hiện tại.`;
   if (['AbortError', 'TimeoutError'].includes(error.name)) return `${method} ${url}: đã dừng hoặc quá thời gian chờ.`;
   return `${method} ${url}: trình duyệt không cung cấp response HTTP (${error.name || 'Error'}: ${error.message || 'lỗi kết nối'}). Kiểm tra OPTIONS/CORS và quyền truy cập mạng nội bộ. Với localhost, mở bản Studio local. Lỗi này chưa xác nhận server đã xử lý request hay chưa.`;
 }

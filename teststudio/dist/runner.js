@@ -43,7 +43,8 @@ export class ScriptSandbox {
 export class TestRunner {
   constructor(collection, {onEvent = () => {}, requestInput, workerFactory, fetchImpl = fetch, assetBase = new URL('./data/', import.meta.url)} = {}) {
     this.collection = collection; this.all = flattenCollection(collection); this.onEvent = onEvent;
-    this.requestInput = requestInput; this.workerFactory = workerFactory; this.fetchImpl = fetchImpl; this.assetBase = assetBase;
+    // Browser fetch requires its Window/Worker receiver, never this TestRunner.
+    this.requestInput = requestInput; this.workerFactory = workerFactory; this.fetchImpl = fetchImpl.bind(globalThis); this.assetBase = assetBase;
     this.results = []; this.cursor = 0; this.status = 'idle'; this.env = {}; this.files = new Map(); this.sockets = new Map();
   }
   emit(type, extra = {}) { this.onEvent({type, cursor: this.cursor, status: this.status, results: this.results, plan: this.plan || [], ...extra}); }
