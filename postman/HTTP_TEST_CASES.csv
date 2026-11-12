@@ -1,0 +1,104 @@
+﻿id,nhom,ten,method,url,tai_khoan,dieu_kien,body,http_mong_doi,loi_mong_doi,ghi_chu,cach_chay
+AUTH-001,01 - Setup tai khoan (THU CONG),Đăng ký seller,POST,{{base_url}}/api/users/register,Không JWT,"seller_email, seller_password",{{register_body}},200,,Email phải do bạn kiểm soát và chưa đăng ký. Cần Brevo để nhận OTP. Không chạy lại request thành công này với cùng email.,Thủ công
+AUTH-002,01 - Setup tai khoan (THU CONG),Login seller trước xác thực bị chặn,POST,{{base_url}}/api/users/login,Không JWT,"seller_email, seller_password",{{auth_body}},400,User not verified,,Thủ công
+AUTH-003,01 - Setup tai khoan (THU CONG),Xác thực OTP seller,POST,{{base_url}}/api/users/verify,Không JWT,"seller_email, seller_verification_code",{{verify_body}},200,,,Thủ công
+AUTH-004,01 - Setup tai khoan (THU CONG),Đăng ký buyer,POST,{{base_url}}/api/users/register,Không JWT,"buyer_email, buyer_password",{{register_body}},200,,Email phải do bạn kiểm soát và chưa đăng ký. Cần Brevo để nhận OTP. Không chạy lại request thành công này với cùng email.,Thủ công
+AUTH-005,01 - Setup tai khoan (THU CONG),Login buyer trước xác thực bị chặn,POST,{{base_url}}/api/users/login,Không JWT,"buyer_email, buyer_password",{{auth_body}},400,User not verified,,Thủ công
+AUTH-006,01 - Setup tai khoan (THU CONG),Xác thực OTP buyer,POST,{{base_url}}/api/users/verify,Không JWT,"buyer_email, buyer_verification_code",{{verify_body}},200,,,Thủ công
+AUTO-001,02 - HTTP tu dong,Login seller,POST,{{base_url}}/api/users/login,Không JWT,"seller_email, seller_password",{{auth_body}},200,,,Tự động
+AUTO-002,02 - HTTP tu dong,Login buyer,POST,{{base_url}}/api/users/login,Không JWT,"buyer_email, buyer_password",{{auth_body}},200,,,Tự động
+AUTO-003,02 - HTTP tu dong,WebSocket thiếu JWT,GET,{{base_url}}/api/auth/ws,Không JWT,,,401,Authorization token missing,,Tự động
+AUTO-004,02 - HTTP tu dong,WebSocket JWT sai,GET,{{base_url}}/api/auth/ws,invalid,,,401,Invalid token,,Tự động
+AUTO-005,02 - HTTP tu dong,Thiếu JWT: POST /api/products,POST,{{base_url}}/api/products,Không JWT,,{},401,Authorization token missing,,Tự động
+AUTO-006,02 - HTTP tu dong,Thiếu JWT: PATCH /api/products/{{missing_id}},PATCH,{{base_url}}/api/products/{{missing_id}},Không JWT,,{},401,Authorization token missing,,Tự động
+AUTO-007,02 - HTTP tu dong,Thiếu JWT: DELETE /api/products/{{missing_id}},DELETE,{{base_url}}/api/products/{{missing_id}},Không JWT,,,401,Authorization token missing,,Tự động
+AUTO-008,02 - HTTP tu dong,Thiếu JWT: POST /api/products/{{missing_id}}/stock,POST,{{base_url}}/api/products/{{missing_id}}/stock,Không JWT,,{},401,Authorization token missing,,Tự động
+AUTO-009,02 - HTTP tu dong,Thiếu JWT: POST /api/orders,POST,{{base_url}}/api/orders,Không JWT,,{},401,Authorization token missing,,Tự động
+AUTO-010,02 - HTTP tu dong,Thiếu JWT: PUT /api/users/me,PUT,{{base_url}}/api/users/me,Không JWT,,{},401,Authorization token missing,,Tự động
+AUTO-011,02 - HTTP tu dong,"Tạo sản phẩm seller: giá 100000, kho 30",POST,{{base_url}}/api/products,seller,seller_token,"{""name"": ""{{product_name}}"", ""price"": 100000, ""stock_quantity"": 30, ""description"": ""Postman regression""}",201,,,Tự động
+AUTO-012,02 - HTTP tu dong,Tạo sản phẩm của buyer,POST,{{base_url}}/api/products,buyer,buyer_token,"{""name"": ""PM_foreign_{{run_id}}"", ""price"": 20000, ""stock_quantity"": 2}",201,,,Tự động
+AUTO-013,02 - HTTP tu dong,Tạo sản phẩm riêng để sửa/xóa,POST,{{base_url}}/api/products,seller,seller_token,"{""name"": ""PM_disposable_{{run_id}}"", ""price"": 25, ""stock_quantity"": 0, ""image_url"": ""https://example.com/product.png"", ""description"": ""Clear me""}",201,,,Tự động
+AUTO-014,02 - HTTP tu dong,Chi tiết sản phẩm công khai,GET,{{base_url}}/api/products/{{product_id}},Không JWT,product_id,,200,,,Tự động
+AUTO-015,02 - HTTP tu dong,Tìm tên và lọc đúng seller,GET,{{base_url}}/api/products?seller_id={{seller_id}}&q={{product_name}},Không JWT,"seller_id, product_name",,200,,,Tự động
+AUTO-016,02 - HTTP tu dong,Phân trang seller - trang 1,GET,{{base_url}}/api/products?seller_id={{seller_id}}&q={{run_id}}&page=1&page_size=1,Không JWT,"seller_id, run_id",,200,,,Tự động
+AUTO-017,02 - HTTP tu dong,Phân trang seller - trang 2 không trùng,GET,{{base_url}}/api/products?seller_id={{seller_id}}&q={{run_id}}&page=2&page_size=1,Không JWT,"seller_id, run_id, first_page_id",,200,,,Tự động
+AUTO-018,02 - HTTP tu dong,Tìm không có kết quả,GET,{{base_url}}/api/products?q=absent_{{missing_id}},Không JWT,,,200,,,Tự động
+AUTO-019,02 - HTTP tu dong,Query/UUID không hợp lệ: /api/products?page=0,GET,{{base_url}}/api/products?page=0,Không JWT,,,400,,,Tự động
+AUTO-020,02 - HTTP tu dong,Query/UUID không hợp lệ: /api/products?page_size=101,GET,{{base_url}}/api/products?page_size=101,Không JWT,,,400,,,Tự động
+AUTO-021,02 - HTTP tu dong,Query/UUID không hợp lệ: /api/products?seller_id=bad-id,GET,{{base_url}}/api/products?seller_id=bad-id,Không JWT,,,400,,,Tự động
+AUTO-022,02 - HTTP tu dong,Query/UUID không hợp lệ: /api/products/not-a-uuid,GET,{{base_url}}/api/products/not-a-uuid,Không JWT,,,400,,,Tự động
+AUTO-023,02 - HTTP tu dong,Sản phẩm không tồn tại,GET,{{base_url}}/api/products/{{missing_id}},Không JWT,,,404,product_not_found,,Tự động
+AUTO-024,02 - HTTP tu dong,Buyer không được PATCH sản phẩm seller,PATCH,{{base_url}}/api/products/{{product_id}},buyer,"product_id, buyer_token","{""name"": ""Hijack""}",403,forbidden,,Tự động
+AUTO-025,02 - HTTP tu dong,Buyer không được POST sản phẩm seller,POST,{{base_url}}/api/products/{{product_id}}/stock,buyer,"product_id, buyer_token","{""quantity_delta"": 1}",403,forbidden,,Tự động
+AUTO-026,02 - HTTP tu dong,Buyer không được DELETE sản phẩm seller,DELETE,{{base_url}}/api/products/{{product_id}},buyer,"product_id, buyer_token",,403,forbidden,,Tự động
+AUTO-027,02 - HTTP tu dong,PATCH lưu giá 0 và xóa ảnh/mô tả,PATCH,{{base_url}}/api/products/{{disposable_product_id}},seller,"disposable_product_id, seller_token","{""name"": ""PM_edited_{{run_id}}"", ""price"": 0, ""image_url"": """", ""description"": """"}",200,,,Tự động
+AUTO-028,02 - HTTP tu dong,PATCH bị từ chối: {},PATCH,{{base_url}}/api/products/{{disposable_product_id}},seller,"disposable_product_id, seller_token",{},400,,,Tự động
+AUTO-029,02 - HTTP tu dong,"PATCH bị từ chối: {""stock_quantity"": 9999}",PATCH,{{base_url}}/api/products/{{disposable_product_id}},seller,"disposable_product_id, seller_token","{""stock_quantity"": 9999}",400,,,Tự động
+AUTO-030,02 - HTTP tu dong,"PATCH bị từ chối: {""seller_id"": ""{{buyer_id}}""}",PATCH,{{base_url}}/api/products/{{disposable_product_id}},seller,"disposable_product_id, seller_token","{""seller_id"": ""{{buyer_id}}""}",400,,,Tự động
+AUTO-031,02 - HTTP tu dong,"PATCH bị từ chối: {""name"": ""  ""}",PATCH,{{base_url}}/api/products/{{disposable_product_id}},seller,"disposable_product_id, seller_token","{""name"": ""  ""}",400,,,Tự động
+AUTO-032,02 - HTTP tu dong,"PATCH bị từ chối: {""price"": 1.001}",PATCH,{{base_url}}/api/products/{{disposable_product_id}},seller,"disposable_product_id, seller_token","{""price"": 1.001}",400,,,Tự động
+AUTO-033,02 - HTTP tu dong,"Create input sai: {""name"": ""X"", ""price"": -1, ""stock_quantity"": 1}",POST,{{base_url}}/api/products,seller,seller_token,"{""name"": ""X"", ""price"": -1, ""stock_quantity"": 1}",400,,,Tự động
+AUTO-034,02 - HTTP tu dong,"Create input sai: {""name"": ""X"", ""price"": 100000000, ""stock_quantity"": 1}",POST,{{base_url}}/api/products,seller,seller_token,"{""name"": ""X"", ""price"": 100000000, ""stock_quantity"": 1}",400,,,Tự động
+AUTO-035,02 - HTTP tu dong,"Create input sai: {""name"": ""X"", ""price"": 1, ""stock_quantity"": -1}",POST,{{base_url}}/api/products,seller,seller_token,"{""name"": ""X"", ""price"": 1, ""stock_quantity"": -1}",400,,,Tự động
+AUTO-036,02 - HTTP tu dong,"Create input sai: {""name"": ""X"", ""stock_quantity"": 1}",POST,{{base_url}}/api/products,seller,seller_token,"{""name"": ""X"", ""stock_quantity"": 1}",400,,,Tự động
+AUTO-037,02 - HTTP tu dong,Điều chỉnh kho 5,POST,{{base_url}}/api/products/{{product_id}}/stock,seller,"product_id, seller_token","{""quantity_delta"": 5}",200,,,Tự động
+AUTO-038,02 - HTTP tu dong,Điều chỉnh kho -2,POST,{{base_url}}/api/products/{{product_id}}/stock,seller,"product_id, seller_token","{""quantity_delta"": -2}",200,,,Tự động
+AUTO-039,02 - HTTP tu dong,Điều chỉnh kho -1000,POST,{{base_url}}/api/products/{{product_id}}/stock,seller,"product_id, seller_token","{""quantity_delta"": -1000}",409,insufficient_stock,,Tự động
+AUTO-040,02 - HTTP tu dong,Điều chỉnh kho 0,POST,{{base_url}}/api/products/{{product_id}}/stock,seller,"product_id, seller_token","{""quantity_delta"": 0}",400,invalid_quantity,,Tự động
+AUTO-041,02 - HTTP tu dong,Xóa sản phẩm chưa được dùng,DELETE,{{base_url}}/api/products/{{disposable_product_id}},seller,"disposable_product_id, seller_token",,204,,,Tự động
+AUTO-042,02 - HTTP tu dong,Sản phẩm đã xóa trả 404,GET,{{base_url}}/api/products/{{disposable_product_id}},Không JWT,disposable_product_id,,404,product_not_found,,Tự động
+AUTO-043,02 - HTTP tu dong,Đơn input sai / thiếu kho / không có sản phẩm,POST,{{base_url}}/api/orders,buyer,"product_id, buyer_token","{""product_id"": ""{{product_id}}"", ""quantity"": -1, ""payment_method"": ""manual""}",400,,,Tự động
+AUTO-044,02 - HTTP tu dong,Đơn input sai / thiếu kho / không có sản phẩm,POST,{{base_url}}/api/orders,buyer,"product_id, buyer_token","{""product_id"": ""{{product_id}}"", ""quantity"": 99999, ""payment_method"": ""manual""}",409,insufficient_stock,,Tự động
+AUTO-045,02 - HTTP tu dong,Đơn input sai / thiếu kho / không có sản phẩm,POST,{{base_url}}/api/orders,buyer,"product_id, buyer_token","{""product_id"": ""{{missing_id}}"", ""quantity"": 1, ""payment_method"": ""manual""}",404,product_not_found,,Tự động
+AUTO-046,02 - HTTP tu dong,Buyer mua 2 sản phẩm,POST,{{base_url}}/api/orders,buyer,"product_id, buyer_token","{""product_id"": ""{{product_id}}"", ""quantity"": 2, ""payment_method"": ""manual""}",201,,,Tự động
+AUTO-047,02 - HTTP tu dong,Kho giảm còn 31 sau đặt hàng,GET,{{base_url}}/api/products/{{product_id}},Không JWT,product_id,,200,,,Tự động
+AUTO-048,02 - HTTP tu dong,Seller không được pay đơn buyer,POST,{{base_url}}/api/orders/{{order_id}}/pay,seller,"order_id, seller_token","{""payment_method"": ""manual""}",404,order_not_found,,Tự động
+AUTO-049,02 - HTTP tu dong,Seller không được cancel đơn buyer,POST,{{base_url}}/api/orders/{{order_id}}/cancel,seller,"order_id, seller_token",,404,order_not_found,,Tự động
+AUTO-050,02 - HTTP tu dong,Seller không được refund đơn buyer,POST,{{base_url}}/api/orders/{{order_id}}/refund,seller,"order_id, seller_token","{""refund_reason"": ""Foreign order""}",404,order_not_found,,Tự động
+AUTO-051,02 - HTTP tu dong,Không hoàn đơn chưa thanh toán,POST,{{base_url}}/api/orders/{{order_id}}/refund,buyer,"order_id, buyer_token","{""refund_reason"": ""Not paid""}",409,order_not_paid,,Tự động
+AUTO-052,02 - HTTP tu dong,Không xóa sản phẩm đang có đơn,DELETE,{{base_url}}/api/products/{{product_id}},seller,"product_id, seller_token",,409,product_in_use,,Tự động
+AUTO-053,02 - HTTP tu dong,Thanh toán nội bộ đơn buyer,POST,{{base_url}}/api/orders/{{order_id}}/pay,buyer,"order_id, buyer_token","{""payment_method"": ""manual""}",200,,,Tự động
+AUTO-054,02 - HTTP tu dong,Không thanh toán lặp,POST,{{base_url}}/api/orders/{{order_id}}/pay,buyer,"order_id, buyer_token","{""payment_method"": ""manual""}",409,order_not_pending,,Tự động
+AUTO-055,02 - HTTP tu dong,Không cancel đơn đã paid,POST,{{base_url}}/api/orders/{{order_id}}/cancel,buyer,"order_id, buyer_token",,409,order_not_pending,,Tự động
+AUTO-056,02 - HTTP tu dong,Hoàn đơn paid,POST,{{base_url}}/api/orders/{{order_id}}/refund,buyer,"order_id, buyer_token","{""refund_reason"": ""Postman regression refund""}",200,,,Tự động
+AUTO-057,02 - HTTP tu dong,Không hoàn đơn lặp,POST,{{base_url}}/api/orders/{{order_id}}/refund,buyer,"order_id, buyer_token","{""refund_reason"": ""Retry""}",409,order_not_paid,,Tự động
+AUTO-058,02 - HTTP tu dong,Hoàn đơn trả kho về 33,GET,{{base_url}}/api/products/{{product_id}},Không JWT,product_id,,200,,,Tự động
+AUTO-059,02 - HTTP tu dong,Tạo đơn thứ hai để cancel,POST,{{base_url}}/api/orders,buyer,"product_id, buyer_token","{""product_id"": ""{{product_id}}"", ""quantity"": 3, ""payment_method"": ""manual""}",201,,,Tự động
+AUTO-060,02 - HTTP tu dong,Cancel đơn pending,POST,{{base_url}}/api/orders/{{cancel_order_id}}/cancel,buyer,"cancel_order_id, buyer_token",,200,,,Tự động
+AUTO-061,02 - HTTP tu dong,Không cancel lặp,POST,{{base_url}}/api/orders/{{cancel_order_id}}/cancel,buyer,"cancel_order_id, buyer_token",,409,order_not_pending,,Tự động
+AUTO-062,02 - HTTP tu dong,Không trả tiền đơn cancelled,POST,{{base_url}}/api/orders/{{cancel_order_id}}/pay,buyer,"cancel_order_id, buyer_token","{""payment_method"": ""manual""}",409,order_not_pending,,Tự động
+AUTO-063,02 - HTTP tu dong,Kho sau cancel vẫn là 33,GET,{{base_url}}/api/products/{{product_id}},Không JWT,product_id,,200,,,Tự động
+AUTO-064,02 - HTTP tu dong,Giữ sản phẩm có lịch sử đơn đã hoàn/hủy,DELETE,{{base_url}}/api/products/{{product_id}},seller,"product_id, seller_token",,409,product_in_use,,Tự động
+AUTO-065,02 - HTTP tu dong,Update profile buyer,PUT,{{base_url}}/api/users/me,buyer,buyer_token,"{""fullname"": ""Postman Buyer"", ""avatar"": ""/uploads/test.png""}",200,,,Tự động
+AUTO-066,02 - HTTP tu dong,Dọn sản phẩm buyer chưa dùng,DELETE,{{base_url}}/api/products/{{buyer_product_id}},buyer,"buyer_product_id, buyer_token",,204,,,Tự động
+FILE-001,03 - Avatar (chon file),Upload avatar PNG,POST,{{base_url}}/api/users/me/avatar,buyer,buyer_token,fixtures/avatar.png,200,,,Có file
+FILE-002,03 - Avatar (chon file),Tải lại avatar vừa upload,GET,{{base_url}}{{avatar_url}},Không JWT,avatar_url,,200,,,Có file
+FILE-003,03 - Avatar (chon file),Không nhận avatar TXT,POST,{{base_url}}/api/users/me/avatar,buyer,buyer_token,fixtures/invalid-avatar.txt,400,Invalid avatar image format,,Có file
+FILE-004,03 - Avatar (chon file),Thiếu file avatar,POST,{{base_url}}/api/users/me/avatar,buyer,buyer_token,,400,,,Có file
+LIVE-001,04 - San pham live (can live_id),Tạo sản phẩm riêng cho live,POST,{{base_url}}/api/products,seller,"live_id, run_id, seller_token","{""name"": ""PM_live_{{run_id}}"", ""price"": 100000, ""stock_quantity"": 20}",201,,,Tự động
+LIVE-002,04 - San pham live (can live_id),Tạo sản phẩm buyer để thử gắn trái quyền,POST,{{base_url}}/api/products,buyer,buyer_token,"{""name"": ""PM_foreign_live_{{run_id}}"", ""price"": 10000, ""stock_quantity"": 2}",201,,,Tự động
+LIVE-003,04 - San pham live (can live_id),Buyer không được gắn sản phẩm vào live seller,POST,{{base_url}}/api/livestreams/{{live_id}}/products,buyer,"live_id, live_product_id, buyer_token","{""product_id"": ""{{live_product_id}}"", ""discount_price"": 80000, ""stock_quantity"": 10, ""is_pinned"": true}",403,forbidden,,Tự động
+LIVE-004,04 - San pham live (can live_id),Seller không được gắn sản phẩm buyer,POST,{{base_url}}/api/livestreams/{{live_id}}/products,seller,"live_id, live_foreign_product_id, seller_token","{""product_id"": ""{{live_foreign_product_id}}"", ""discount_price"": 80000, ""stock_quantity"": 1, ""is_pinned"": true}",403,forbidden,,Tự động
+LIVE-005,04 - San pham live (can live_id),Gắn sản phẩm và cấp 10 đơn vị kho cho live,POST,{{base_url}}/api/livestreams/{{live_id}}/products,seller,"live_id, live_product_id, seller_token","{""product_id"": ""{{live_product_id}}"", ""discount_price"": 80000, ""stock_quantity"": 10, ""is_pinned"": true}",201,,,Tự động
+LIVE-006,04 - San pham live (can live_id),Kho gốc còn 10 sau cấp kho live,GET,{{base_url}}/api/products/{{live_product_id}},Không JWT,live_product_id,,200,,,Tự động
+LIVE-007,04 - San pham live (can live_id),Không gắn trùng sản phẩm,POST,{{base_url}}/api/livestreams/{{live_id}}/products,seller,"live_id, live_product_id, seller_token","{""product_id"": ""{{live_product_id}}"", ""discount_price"": 80000, ""stock_quantity"": 10, ""is_pinned"": true}",409,product_already_in_livestream,,Tự động
+LIVE-008,04 - San pham live (can live_id),Không xóa sản phẩm gốc đang trong live,DELETE,{{base_url}}/api/products/{{live_product_id}},seller,"live_product_id, seller_token",,409,product_in_use,,Tự động
+LIVE-009,04 - San pham live (can live_id),Mua live 2 sản phẩm theo giá 80000,POST,{{base_url}}/api/orders,buyer,"live_id, live_product_id, buyer_token","{""product_id"": ""{{live_product_id}}"", ""quantity"": 2, ""livestream_id"": ""{{live_id}}"", ""payment_method"": ""manual""}",201,,,Tự động
+LIVE-010,04 - San pham live (can live_id),Không gỡ sản phẩm còn đơn pending,DELETE,{{base_url}}/api/livestreams/{{live_id}}/products/{{live_product_id}},seller,"live_id, live_product_id, seller_token",,409,product_has_active_orders,,Tự động
+LIVE-011,04 - San pham live (can live_id),Cancel đơn live trả lại phần kho live,POST,{{base_url}}/api/orders/{{live_order_id}}/cancel,buyer,"live_order_id, buyer_token",,200,,,Tự động
+LIVE-012,04 - San pham live (can live_id),Tạo đơn live thứ hai để pay/refund,POST,{{base_url}}/api/orders,buyer,"live_id, live_product_id, buyer_token","{""product_id"": ""{{live_product_id}}"", ""quantity"": 3, ""livestream_id"": ""{{live_id}}"", ""payment_method"": ""manual""}",201,,,Tự động
+LIVE-013,04 - San pham live (can live_id),Pay đơn live,POST,{{base_url}}/api/orders/{{live_paid_order_id}}/pay,buyer,"live_paid_order_id, buyer_token","{""payment_method"": ""manual""}",200,,,Tự động
+LIVE-014,04 - San pham live (can live_id),Refund đơn live,POST,{{base_url}}/api/orders/{{live_paid_order_id}}/refund,buyer,"live_paid_order_id, buyer_token","{""refund_reason"": ""Postman live refund""}",200,,,Tự động
+LIVE-015,04 - San pham live (can live_id),Buyer không được gỡ sản phẩm live seller,DELETE,{{base_url}}/api/livestreams/{{live_id}}/products/{{live_product_id}},buyer,"live_id, live_product_id, buyer_token",,403,forbidden,,Tự động
+LIVE-016,04 - San pham live (can live_id),"Gỡ sản phẩm, trả kho chưa bán về kho gốc",DELETE,{{base_url}}/api/livestreams/{{live_id}}/products/{{live_product_id}},seller,"live_id, live_product_id, seller_token",,204,,,Tự động
+LIVE-017,04 - San pham live (can live_id),Kho gốc trở lại 20 sau gỡ live,GET,{{base_url}}/api/products/{{live_product_id}},Không JWT,live_product_id,,200,,,Tự động
+LIVE-018,04 - San pham live (can live_id),Dọn sản phẩm buyer dùng thử quyền,DELETE,{{base_url}}/api/products/{{live_foreign_product_id}},buyer,"live_foreign_product_id, buyer_token",,204,,,Tự động
+END-001,05 - Live da ket thuc (can ended_live_id),Không thêm sản phẩm vào live đã kết thúc,POST,{{base_url}}/api/livestreams/{{ended_live_id}}/products,seller,"ended_live_id, live_product_id, seller_token","{""product_id"": ""{{live_product_id}}"", ""discount_price"": 80000, ""stock_quantity"": 1}",409,livestream_not_active,,Tự động
+END-002,05 - Live da ket thuc (can ended_live_id),Không đặt hàng live đã kết thúc,POST,{{base_url}}/api/orders,buyer,"ended_live_id, live_product_id, buyer_token","{""product_id"": ""{{live_product_id}}"", ""livestream_id"": ""{{ended_live_id}}"", ""quantity"": 1, ""payment_method"": ""manual""}",409,livestream_not_active,,Tự động
+RESET-001,06 - Reset mat khau (THU CONG),Yêu cầu OTP reset (Brevo đã cấu hình),POST,{{base_url}}/api/users/password/reset-request,Không JWT,buyer_email,{{email_body}},200,,,Thủ công
+RESET-002,06 - Reset mat khau (THU CONG),Xác nhận OTP reset và đổi mật khẩu,POST,{{base_url}}/api/users/password/reset,Không JWT,"buyer_email, buyer_reset_code, buyer_new_password, buyer_password",{{reset_body}},200,,,Thủ công
+RESET-003,06 - Reset mat khau (THU CONG),Login buyer (mật khẩu cũ),POST,{{base_url}}/api/users/login,Không JWT,"buyer_email, buyer_previous_password",{{auth_body}},400,,,Thủ công
+RESET-004,06 - Reset mat khau (THU CONG),Login buyer,POST,{{base_url}}/api/users/login,Không JWT,"buyer_email, buyer_password",{{auth_body}},200,,,Thủ công
+RESET-005,06 - Reset mat khau (THU CONG),OTP đã dùng không được dùng lại,POST,{{base_url}}/api/users/password/reset,Không JWT,"buyer_email, buyer_reset_code, buyer_new_password",{{reset_body}},400,otp_expired,,Thủ công
+RESET-006,06 - Reset mat khau (THU CONG),Email không có tài khoản,POST,{{base_url}}/api/users/password/reset-request,Không JWT,,"{""email"": ""missing-{{$randomUUID}}@example.invalid""}",404,user_not_found,,Thủ công
+RESET-007,06 - Reset mat khau (THU CONG),Brevo chưa cấu hình trả lỗi rõ ràng,POST,{{base_url}}/api/users/password/reset-request,Không JWT,buyer_email,{{email_body}},502,email_delivery_failed,Chỉ chạy khi BREVO_API_KEY/FROM_EMAIL chưa cấu hình. Không chạy case này trước xác nhận OTP của case RESET-002 vì request mới sẽ phát hành mã mới.,Thủ công

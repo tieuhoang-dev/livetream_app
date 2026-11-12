@@ -1,0 +1,149 @@
+# Test Livestream App bằng Postman
+
+Bộ test theo `main` commit `7dc3dd0` của `tieuhoang-dev/livetream_app`.
+Gồm **103 request HTTP có assertion**, bảng test case CSV, file Environment,
+ảnh mẫu và hướng dẫn WebSocket riêng.
+
+## 1. Import và cấu hình
+
+1. Giải nén ZIP, mở Postman → **Import**, chọn:
+   - `Livestream_App.postman_collection.json`
+   - `Livestream_Local.postman_environment.json`
+2. Chọn Environment **Livestream App - Local (dien tai khoan test)**.
+3. Đặt `base_url`, mặc định `http://localhost:8080`. Khi chạy một HTTP request,
+   collection tự cập nhật `ws_url` tương ứng (`http → ws`, `https → wss`).
+4. Điền bốn biến cho **hai tài khoản test khác nhau, đã xác thực và active**:
+
+   | Biến | Giá trị |
+   | --- | --- |
+   | `seller_email` | Email tài khoản bán hàng test |
+   | `seller_password` | Mật khẩu tài khoản đó |
+   | `buyer_email` | Email tài khoản mua hàng test |
+   | `buyer_password` | Mật khẩu tài khoản đó |
+
+`seller` và `buyer` là tên gọi trong bộ test, không yêu cầu role riêng trong DB.
+Collection không chứa email, password, JWT hoặc Brevo key thật. Không cần nhập
+JWT thủ công: request login tự lưu token và lấy user ID từ payload JWT.
+
+Backend cần MySQL, MongoDB, Redis như trong repo. Nếu chạy từ `.env`, lưu ý cấu
+hình Redis hiện được đọc khi package khởi tạo: export `REDIS_ADDR` và
+`REDIS_PASSWORD` trước khi chạy. Môi trường kiểm thử đã dùng `GOMAXPROCS=8` để
+pool Redis mặc định đủ phục vụ 50 worker blocking; đây là cấu hình test, không
+phải kết quả đo khả năng chịu tải production.
+
+## 2. Nếu chưa có tài khoản
+
+Chạy **từng request** trong folder `01 - Setup tai khoan (THU CONG)`:
+
+1. Điền email bạn kiểm soát và password cho seller/buyer.
+2. Đăng ký seller, kiểm tra login trước xác thực trả 400.
+3. Lấy OTP từ email, điền `seller_verification_code`, rồi chạy Verify seller.
+4. Làm tương tự cho buyer với `buyer_verification_code`.
+
+Username được tạo tự động nếu bạn chưa nhập. Nếu email đã đăng ký, register
+trả 409: dùng tài khoản khác hoặc bỏ qua đăng ký khi tài khoản đã verified.
+OTP hết hạn sau 15 phút; request Verify thành công phải được gửi trước khi hết
+hạn. Không chạy lại Verify thành công: backend trả 400 cho user đã verified.
+
+Nếu chưa có `BREVO_API_KEY`/`FROM_EMAIL`, bạn không nhận được OTP thực. Hãy dùng
+hai tài khoản test đã được chuẩn bị/xác thực trong môi trường của mình. Bộ
+Postman không bỏ qua hoặc giả lập bước xác thực email của backend.
+
+## 3. Chạy HTTP tự động
+
+Trong Collection Runner, **chỉ chọn folder `02 - HTTP tu dong`**, chạy 1
+iteration và giữ thứ tự request. Bật tùy chọn giữ giá trị biến sau khi chạy
+(Keep variable values/Persist variables, tùy phiên bản) nếu muốn dùng các token
+và ID này cho bước WebSocket tiếp theo.
+
+Folder có **66 request**, tự tạo `run_id` mới, đăng nhập hai tài khoản, lưu ID
+sản phẩm/đơn hàng, kiểm tra:
+
+- JWT thiếu/sai; quyền truy cập khi chưa đăng nhập.
+- Product create/detail/list, lọc seller, tìm tên, phân trang, input sai.
+- Chặn sửa/xóa/điều chỉnh kho sản phẩm của người khác.
+- PATCH giá 0, xóa ảnh/mô tả; chặn ghi đè owner hoặc kho qua PATCH.
+- Cộng/trừ kho; chặn âm kho, delta 0.
+- Đặt đơn → kiểm tra kho → pay → refund → kiểm tra kho trả lại.
+- Đặt đơn thứ hai → cancel; chặn pay/cancel/refund lặp hoặc sai trạng thái.
+- Không cho tác động vào đơn của tài khoản khác, xóa sản phẩm có lịch sử đơn.
+- Cập nhật profile và dọn sản phẩm chưa được sử dụng.
+
+Không Run toàn bộ collection một lượt: các folder khác cần OTP, chọn file hoặc
+tạo/kết thúc live thủ công. Thiếu biến bắt buộc sẽ báo lỗi pre-request để bạn
+biết bước cần chuẩn bị; không được tính là test đã đạt.
+
+Chạy trên dữ liệu/tài khoản test: bộ test tạo sản phẩm và đơn, thay đổi profile,
+thanh toán/hủy/hoàn đơn nội bộ. Mỗi lượt giữ lại sản phẩm đã được OrderItem tham
+chiếu và các đơn test vì backend chưa có API xóa đơn. Tên `PM_<run_id>` giúp
+nhận diện dữ liệu. Các request điều chỉnh kho/đặt hàng áp dụng thay đổi thật vào
+DB test; không tự resend request khi chưa rõ kết quả lần trước.
+
+## 4. Avatar
+
+Sau folder 02, chọn folder `03 - Avatar (chon file)`:
+
+- Đặt Postman Working directory là thư mục giải nén; hoặc mở Body → form-data
+  → field `file`, chọn `fixtures/avatar.png` và `fixtures/invalid-avatar.txt`
+  trong từng request tương ứng.
+- Chạy 4 request theo thứ tự: upload PNG, tải lại ảnh, từ chối TXT, thiếu file.
+- Nếu dùng Postman trên web, chọn agent có thể đọc file và gọi được backend
+  local; nếu file không resolve, chọn lại file trong UI.
+
+## 5. Live và sản phẩm trong live
+
+Đọc `WEBSOCKET_TEST_CASES.md`. Collection JSON v2.1 này là **HTTP collection**;
+các message WebSocket cần mở bằng New → WebSocket Request trong Postman.
+
+1. Sau folder 02, mở hai kết nối WS theo URL seller/buyer trong tài liệu.
+2. Seller gửi `create_live`, copy `id` trả về vào Environment `live_id`.
+3. Buyer gửi `join_live`, mong đợi `join_live_success`.
+4. Chạy folder `04 - San pham live (can live_id)` (18 request): tạo sản phẩm
+   riêng, kiểm tra quyền, gắn/cấp kho live, mua theo giá giảm, cancel, pay/refund,
+   gỡ sản phẩm và kiểm tra kho gốc trở lại 20.
+5. Seller gửi `end_live` với `content` là `live_id`. Copy ID đó vào
+   `ended_live_id`.
+6. Buyer gửi `join_live` lại: phải nhận `join_live_error`.
+7. Chạy folder `05 - Live da ket thuc (can ended_live_id)` (2 request): chặn
+   gắn thêm sản phẩm và đặt hàng live đã kết thúc với 409.
+
+Không có API HTTP tạo live, nên không gọi `POST /api/livestreams`.
+
+## 6. Reset mật khẩu
+
+Folder `06 - Reset mat khau (THU CONG)` phải chạy từng bước, trên tài khoản test
+buyer. Các case trong folder có điều kiện khác nhau, không Run cả folder.
+
+1. `RESET-001`: khi Brevo đã cấu hình, yêu cầu OTP, mong đợi 200.
+2. Điền `buyer_reset_code` từ email, `buyer_new_password` khác mật khẩu cũ.
+3. `RESET-002`: xác nhận reset, mong đợi 200. Script tự lưu mật khẩu cũ vào
+   `buyer_previous_password`, rồi cập nhật `buyer_password` trong Environment.
+4. `RESET-003`: login mật khẩu cũ trả 400; `RESET-004`: mật khẩu mới trả 200,
+   cập nhật `buyer_token`.
+5. `RESET-005`: dùng lại OTP vừa dùng trả `400 otp_expired` (mã đã bị xóa).
+6. `RESET-006`: email không tồn tại trả 404.
+7. `RESET-007`: **chỉ chạy khi Brevo chưa cấu hình/gửi thất bại**, mong đợi
+   `502 email_delivery_failed`. Không chạy giữa bước xin OTP và xác nhận OTP:
+   request reset mới sẽ thay thế mã đang chờ.
+
+OTP sai/hết hạn, tài khoản inactive và file quá 10 MB cần fixture/trạng thái
+riêng; xem bảng bổ sung trong tài liệu WebSocket. Không coi 502 là thành công
+của luồng gửi email. Pay/refund trong app hiện chỉ đổi trạng thái nội bộ, không
+chứng minh đã thu hoặc hoàn tiền qua ngân hàng.
+
+## 7. Chạy bằng Newman (tùy chọn)
+
+```sh
+newman run Livestream_App.postman_collection.json \
+  -e my-private-local.postman_environment.json \
+  --folder "02 - HTTP tu dong" \
+  --working-dir . --bail failure
+```
+
+Sao chép Environment mẫu thành file riêng và điền tài khoản trước khi chạy.
+Muốn chạy tiếp folder live/avatar bằng CLI, dùng `--export-environment` rồi nạp
+file xuất ở lần tiếp theo. File xuất chứa token/password của bạn, giữ riêng.
+
+`HTTP_TEST_CASES.csv` mở được bằng Excel/Google Sheets, gồm ID, điều kiện, body,
+HTTP status và mã lỗi mong đợi cho cả 103 request. `VALIDATION.md` ghi rõ những
+folder đã chạy xác minh và các phần còn cần OTP thực.
