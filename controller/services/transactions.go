@@ -129,6 +129,62 @@ func AddProductToLivestream(userID, livestreamID, productID string, discountPric
 	})
 }
 
+const closedLivestreamProduct = "closed"
+
+// EndLivestream returns unreserved stock to the catalog and keeps allocations
+// for orders that may still be cancelled or refunded after the live ends.
+func EndLivestream(userID, livestreamID string) (*models.Livestream, error) {
+	var live *models.Livestream
+	err := config.DB.Transaction(func(tx *gorm.DB) error {
+		var err error
+		live, err = ownedLivestream(tx, userID, livestreamID)
+		if err != nil {
+			return err
+		}
+		var products []models.LivestreamProduct
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("livestream_id = ? AND status <> ?", live.ID, closedLivestreamProduct).
+			Order("product_id ASC, id ASC").Find(&products).Error; err != nil {
+			return err
+		}
+		for _, product := range products {
+			if err := restoreCatalogStock(tx, product.ProductCode, product.StockQuantity); err != nil {
+				return err
+			}
+			if err := tx.Model(&product).Updates(map[string]interface{}{
+				"stock_quantity": 0, "status": closedLivestreamProduct,
+			}).Error; err != nil {
+				return err
+			}
+		}
+		if live.Status == "end" && live.EndedAt != nil {
+			return nil
+		}
+		endedAt := time.Now()
+		live.Status, live.EndedAt = "end", &endedAt
+		return tx.Model(live).Updates(map[string]interface{}{"status": live.Status, "ended_at": endedAt}).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return live, nil
+}
+
+func restoreCatalogStock(tx *gorm.DB, productID string, quantity int) error {
+	if quantity == 0 {
+		return nil
+	}
+	result := tx.Model(&models.Product{}).Where("id = ?", productID).
+		UpdateColumn("stock_quantity", gorm.Expr("stock_quantity + ?", quantity))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return errors.New("product_not_found")
+	}
+	return nil
+}
+
 func RemoveProductFromLivestream(userID, livestreamID, productID string) error {
 	return config.DB.Transaction(func(tx *gorm.DB) error {
 		if _, err := ownedLivestream(tx, userID, livestreamID); err != nil {
@@ -146,12 +202,8 @@ func RemoveProductFromLivestream(userID, livestreamID, productID string) error {
 		if activeOrders > 0 {
 			return errors.New("product_has_active_orders")
 		}
-		result := tx.Model(&models.Product{}).Where("id = ?", productID).UpdateColumn("stock_quantity", gorm.Expr("stock_quantity + ?", liveProduct.StockQuantity))
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return errors.New("product_not_found")
+		if err := restoreCatalogStock(tx, productID, liveProduct.StockQuantity); err != nil {
+			return err
 		}
 		return tx.Delete(&liveProduct).Error
 	})
@@ -195,25 +247,38 @@ func RefundOrder(userID, orderID, action, refundReason string) error {
 		if err := tx.Model(&payment).Update("status", order.Status).Error; err != nil {
 			return err
 		}
+		if order.LivestreamID != nil {
+			// Use the same lock order as ending the live or changing its allocations.
+			var live models.Livestream
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Take(&live, "id = ?", *order.LivestreamID).Error; err != nil {
+				return lookupError(err, "livestream_not_found")
+			}
+		}
 		var items []models.OrderItem
-		if err := tx.Where("order_id = ?", orderID).Find(&items).Error; err != nil {
+		if err := tx.Where("order_id = ?", orderID).Order("product_id ASC, id ASC").Find(&items).Error; err != nil {
 			return err
 		}
 		for _, item := range items {
-			query := tx.Model(&models.Product{}).Where("id = ?", item.ProductID)
-			if order.LivestreamID != nil {
-				query = tx.Model(&models.LivestreamProduct{}).Where("livestream_id = ? AND product_id = ?", *order.LivestreamID, item.ProductID)
-			}
-			result := query.UpdateColumn("stock_quantity", gorm.Expr("stock_quantity + ?", item.Quantity))
-			if result.Error != nil {
-				return result.Error
-			}
-			if result.RowsAffected != 1 {
-				return errors.New("product_not_found")
+			if err := restoreOrderItemStock(tx, order.LivestreamID, item); err != nil {
+				return err
 			}
 		}
 		return nil
 	})
+}
+
+func restoreOrderItemStock(tx *gorm.DB, livestreamID *string, item models.OrderItem) error {
+	if livestreamID == nil {
+		return restoreCatalogStock(tx, item.ProductID, item.Quantity)
+	}
+	var liveProduct models.LivestreamProduct
+	if err := tx.Take(&liveProduct, "livestream_id = ? AND product_id = ?", *livestreamID, item.ProductID).Error; err != nil {
+		return lookupError(err, "product_not_found_in_livestream")
+	}
+	if liveProduct.Status == closedLivestreamProduct {
+		return restoreCatalogStock(tx, item.ProductID, item.Quantity)
+	}
+	return tx.Model(&liveProduct).UpdateColumn("stock_quantity", gorm.Expr("stock_quantity + ?", item.Quantity)).Error
 }
 
 // This records the internal payment status; it does not charge a payment gateway.

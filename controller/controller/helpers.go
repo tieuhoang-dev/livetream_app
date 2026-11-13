@@ -3,6 +3,8 @@ package controllers
 import (
 	"net/http"
 
+	"livesteam_app/controller/services"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -43,4 +45,20 @@ func validID(c *gin.Context, name string) bool {
 		return false
 	}
 	return true
+}
+
+func defaultPagination() services.Pagination {
+	return services.Pagination{Page: 1, PageSize: 20}
+}
+
+func bindListQuery(c *gin.Context, query interface{}) bool {
+	if err := c.ShouldBindQuery(query); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_query"})
+		return false
+	}
+	return true
+}
+
+func writePage[T any](c *gin.Context, page services.Pagination, items []T, total int64) {
+	c.JSON(http.StatusOK, gin.H{"data": items, "total": total, "page": page.Page, "page_size": page.PageSize})
 }

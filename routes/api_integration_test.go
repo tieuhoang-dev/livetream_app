@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -148,6 +149,8 @@ func TestConnectedAPI(t *testing.T) {
 			{"POST", "/api/products"}, {"PATCH", "/api/products/" + uuid.NewString()},
 			{"DELETE", "/api/products/" + uuid.NewString()}, {"POST", "/api/products/" + uuid.NewString() + "/stock"},
 			{"PUT", "/api/users/me"}, {"POST", "/api/users/me/avatar"}, {"POST", "/api/orders"},
+			{"GET", "/api/orders"}, {"GET", "/api/orders/" + uuid.NewString()},
+			{"GET", "/api/sales/offline"}, {"GET", "/api/sales/offline/" + uuid.NewString()},
 			{"POST", "/api/orders/" + uuid.NewString() + "/pay"}, {"POST", "/api/orders/" + uuid.NewString() + "/cancel"},
 			{"POST", "/api/orders/" + uuid.NewString() + "/refund"},
 			{"POST", "/api/livestreams/" + uuid.NewString() + "/products"},
@@ -468,6 +471,153 @@ func TestConnectedAPI(t *testing.T) {
 		assertJoin(liveID, "join_live_error")
 		call(t, seller.ID, "POST", path, payload, 409)
 		call(t, buyer.ID, "POST", "/api/orders", gin.H{"product_id": p.ID, "quantity": 1, "livestream_id": liveID, "payment_method": "manual"}, 409)
+	})
+
+	t.Run("discover livestreams and reconcile live and offline sales", func(t *testing.T) {
+		ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/api/auth/ws?token="+tokens[seller.ID], nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ws.Close()
+		if err := ws.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		liveMessage := func(kind, content string) map[string]interface{} {
+			t.Helper()
+			if err := ws.WriteJSON(gin.H{"type": kind, "content": content}); err != nil {
+				t.Fatal(err)
+			}
+			var reply map[string]interface{}
+			if err := ws.ReadJSON(&reply); err != nil || reply["type"] != kind+"_success" {
+				t.Fatalf("%s: %v %v", kind, reply, err)
+			}
+			return reply
+		}
+		prefix := "Live " + uuid.NewString()
+		liveID := liveMessage("create_live", prefix+"_A")["id"].(string)
+		otherID := liveMessage("create_live", prefix+"XA")["id"].(string)
+		if err := db.Model(&models.Livestream{}).Where("id = ?", liveID).Update("started_at", time.Now().Add(-time.Hour)).Error; err != nil {
+			t.Fatal(err)
+		}
+		query := "/api/livestreams?seller_id=" + seller.ID + "&q=" + url.QueryEscape(prefix)
+		list := call(t, "", "GET", query+"&sort=oldest&page_size=1", nil, 200)
+		if list["total"] != float64(2) || list["data"].([]interface{})[0].(map[string]interface{})["id"] != liveID {
+			t.Fatalf("oldest first: %v", list)
+		}
+		list = call(t, "", "GET", query+"&page_size=1", nil, 200)
+		if list["data"].([]interface{})[0].(map[string]interface{})["id"] != otherID {
+			t.Fatalf("newest first: %v", list)
+		}
+		list = call(t, "", "GET", query+"&sort=oldest&page_size=1&page=2", nil, 200)
+		if list["data"].([]interface{})[0].(map[string]interface{})["id"] != otherID {
+			t.Fatalf("second page: %v", list)
+		}
+		literalQuery := "/api/livestreams?q=" + url.QueryEscape(prefix+"_A")
+		if list := call(t, "", "GET", literalQuery, nil, 200); list["total"] != float64(1) {
+			t.Fatalf("underscore in title must match literally: %v", list)
+		}
+		for _, filter := range []string{"status=unknown", "sort=price", "seller_id=bad", "product_id=bad", "page_size=101"} {
+			call(t, "", "GET", "/api/livestreams?"+filter, nil, 400)
+		}
+		livePath := "/api/livestreams/" + liveID
+		live := call(t, "", "GET", livePath, nil, 200)
+		if live["seller_username"] != seller.Username || live["status"] != "start" || live["ended_at"] != nil || live["user"] != nil {
+			t.Fatalf("unexpected public live detail: %v", live)
+		}
+		call(t, "", "GET", "/api/livestreams/"+uuid.NewString()+"/products", nil, 404)
+		if list := call(t, "", "GET", livePath+"/products", nil, 200); len(list["data"].([]interface{})) != 0 {
+			t.Fatalf("expected empty live product list: %v", list)
+		}
+		p := product(t, seller.ID, 10)
+		call(t, seller.ID, "POST", livePath+"/products", gin.H{"product_id": p.ID, "discount_price": 80, "stock_quantity": 10, "is_pinned": true}, 201)
+		catalog := "/api/products?seller_id=" + seller.ID + "&in_stock=true&page_size=100"
+		containsProduct := func(list map[string]interface{}) bool {
+			for _, row := range list["data"].([]interface{}) {
+				if row.(map[string]interface{})["id"] == p.ID {
+					return true
+				}
+			}
+			return false
+		}
+		if containsProduct(call(t, "", "GET", catalog, nil, 200)) {
+			t.Fatal("stock reserved for live must not appear in the in-stock catalog")
+		}
+		if list := call(t, "", "GET", query+"&product_id="+p.ID, nil, 200); list["total"] != float64(1) {
+			t.Fatalf("product filter: %v", list)
+		}
+		list = call(t, "", "GET", livePath+"/products", nil, 200)
+		item := list["data"].([]interface{})[0].(map[string]interface{})
+		if item["product_id"] != p.ID || item["original_price"] != float64(100) || item["discount_price"] != float64(80) || item["is_pinned"] != true {
+			t.Fatalf("live product snapshot: %v", item)
+		}
+		paidID := order(t, p, &liveID, 2)
+		call(t, buyer.ID, "POST", "/api/orders/"+paidID+"/pay", gin.H{"payment_method": "manual"}, 200)
+		pendingID := order(t, p, &liveID, 3)
+		liveMessage("end_live", liveID)
+		endedAt := call(t, "", "GET", livePath, nil, 200)["ended_at"]
+		liveMessage("end_live", liveID)
+		if stock(t, p.ID) != 5 || endedAt == nil || call(t, "", "GET", livePath, nil, 200)["ended_at"] != endedAt {
+			t.Fatal("ending live must return free stock once and preserve ended_at")
+		}
+		if list := call(t, "", "GET", literalQuery, nil, 200); list["total"] != float64(0) {
+			t.Fatalf("ended live must not appear in default list: %v", list)
+		}
+		for _, status := range []string{"end", "all"} {
+			if list := call(t, "", "GET", literalQuery+"&status="+status, nil, 200); list["total"] != float64(1) {
+				t.Fatalf("status %s: %v", status, list)
+			}
+		}
+		if !containsProduct(call(t, "", "GET", catalog, nil, 200)) {
+			t.Fatal("stock returned by end_live must be visible in the offline catalog")
+		}
+		offline := call(t, buyer.ID, "POST", "/api/orders", gin.H{"product_id": p.ID, "quantity": 4, "payment_method": "manual"}, 201)
+		offlineID := offline["order_id"].(string)
+		if offline["total_amount"] != float64(400) || stock(t, p.ID) != 1 {
+			t.Fatalf("offline purchase must use catalog price and stock: %v", offline)
+		}
+		call(t, buyer.ID, "POST", "/api/orders/"+pendingID+"/cancel", nil, 200)
+		call(t, buyer.ID, "POST", "/api/orders/"+paidID+"/refund", gin.H{"refund_reason": "Test refund"}, 200)
+		if stock(t, p.ID) != 6 {
+			t.Fatal("live cancellation and refund after end must restore catalog stock")
+		}
+		assertOrders := func(actor, path, wantID, wantStatus string, offlineOnly bool) {
+			t.Helper()
+			list := call(t, actor, "GET", path, nil, 200)
+			found := false
+			for _, row := range list["data"].([]interface{}) {
+				entry := row.(map[string]interface{})
+				if entry["status"] != wantStatus || (entry["livestream_id"] == nil) != offlineOnly {
+					t.Fatalf("wrong order for %s: %v", path, entry)
+				}
+				found = found || entry["id"] == wantID
+			}
+			if !found {
+				t.Fatalf("expected order %s in %s: %v", wantID, path, list)
+			}
+		}
+		assertOrders(buyer.ID, "/api/orders?channel=offline&status=pending", offlineID, "pending", true)
+		assertOrders(buyer.ID, "/api/orders?channel=live&status=refunded", paidID, "refunded", false)
+		assertOrders(seller.ID, "/api/sales/offline?status=pending", offlineID, "pending", true)
+		if list := call(t, buyer.ID, "GET", "/api/sales/offline", nil, 200); list["total"] != float64(0) {
+			t.Fatalf("buyer received another seller's sales: %v", list)
+		}
+		call(t, buyer.ID, "GET", "/api/orders?channel=unknown", nil, 400)
+		call(t, seller.ID, "GET", "/api/sales/offline?status=unknown", nil, 400)
+		for _, actorPath := range [][2]string{{buyer.ID, "/api/orders/"}, {seller.ID, "/api/sales/offline/"}} {
+			detail := call(t, actorPath[0], "GET", actorPath[1]+offlineID, nil, 200)
+			line := detail["items"].([]interface{})[0].(map[string]interface{})
+			payment := detail["payment"].(map[string]interface{})
+			if detail["livestream_id"] != nil || line["product_id"] != p.ID || line["name"] != p.Name || line["quantity"] != float64(4) || line["price_at_purchase"] != float64(100) || payment["payment_method"] != "manual" {
+				t.Fatalf("offline order detail: %v", detail)
+			}
+		}
+		call(t, buyer.ID, "GET", "/api/sales/offline/"+offlineID, nil, 404)
+		call(t, seller.ID, "GET", "/api/orders/"+offlineID, nil, 404)
+		call(t, seller.ID, "GET", "/api/sales/offline/"+paidID, nil, 404)
+		call(t, seller.ID, "DELETE", livePath+"/products/"+p.ID, nil, 204)
+		if stock(t, p.ID) != 6 {
+			t.Fatal("removing an ended allocation must not restore stock again")
+		}
 	})
 
 	t.Run("password reset uses a separate expiring single-use OTP", func(t *testing.T) {
