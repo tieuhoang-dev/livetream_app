@@ -26,6 +26,24 @@ func GetOrder(c *gin.Context) {
 	writeOrderDetail(c, services.GetOrder)
 }
 
+func ListSellerOrders(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	query := services.OrderQuery{Pagination: defaultPagination()}
+	if !ok || !bindListQuery(c, &query) {
+		return
+	}
+	items, total, err := services.ListSellerOrders(userID, query)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	writePage(c, query.Pagination, items, total)
+}
+
+func GetSellerOrder(c *gin.Context) {
+	writeOrderDetail(c, services.GetSellerOrder)
+}
+
 func ListOfflineSales(c *gin.Context) {
 	userID, ok := currentUserID(c)
 	query := struct {

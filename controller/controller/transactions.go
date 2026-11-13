@@ -54,7 +54,7 @@ func CancelOrder(c *gin.Context) {
 	if !ok || !validID(c, "order_id") {
 		return
 	}
-	if err := services.RefundOrder(userID, c.Param("order_id"), "cancel", ""); err != nil {
+	if err := services.CancelOrder(userID, c.Param("order_id")); err != nil {
 		writeServiceError(c, err)
 		return
 	}
@@ -73,7 +73,7 @@ func RefundOrder(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := services.RefundOrder(userID, c.Param("order_id"), "refund", input.Reason); err != nil {
+	if err := services.RefundOrder(userID, c.Param("order_id"), input.Reason); err != nil {
 		writeServiceError(c, err)
 		return
 	}

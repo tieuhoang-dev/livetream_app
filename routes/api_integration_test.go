@@ -70,8 +70,8 @@ func TestConnectedAPI(t *testing.T) {
 		}
 		return u
 	}
-	seller, buyer := newUser(), newUser()
-	ids := []string{seller.ID, buyer.ID}
+	seller, buyer, other := newUser(), newUser(), newUser()
+	ids := []string{seller.ID, buyer.ID, other.ID}
 	t.Cleanup(func() {
 		db.Exec("DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE user_id IN ?)", ids)
 		db.Exec("DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE user_id IN ?)", ids)
@@ -83,7 +83,7 @@ func TestConnectedAPI(t *testing.T) {
 		db.Where("id IN ?", ids).Delete(&models.User{})
 	})
 	tokens := map[string]string{}
-	for _, u := range []models.User{seller, buyer} {
+	for _, u := range []models.User{seller, buyer, other} {
 		token, err := utils.GenerateJWT(u.ID, u.Role, u.Username)
 		if err != nil {
 			t.Fatal(err)
@@ -156,6 +156,9 @@ func TestConnectedAPI(t *testing.T) {
 			{"PUT", "/api/users/me"}, {"POST", "/api/users/me/avatar"}, {"POST", "/api/orders"},
 			{"GET", "/api/orders"}, {"GET", "/api/orders/" + uuid.NewString()},
 			{"GET", "/api/sales/offline"}, {"GET", "/api/sales/offline/" + uuid.NewString()},
+			{"GET", "/api/sales/orders"}, {"GET", "/api/sales/orders/" + uuid.NewString()},
+			{"POST", "/api/sales/orders/" + uuid.NewString() + "/pay"},
+			{"POST", "/api/sales/orders/" + uuid.NewString() + "/refund"},
 			{"POST", "/api/orders/" + uuid.NewString() + "/pay"}, {"POST", "/api/orders/" + uuid.NewString() + "/cancel"},
 			{"POST", "/api/orders/" + uuid.NewString() + "/refund"},
 			{"POST", "/api/livestreams/" + uuid.NewString() + "/products"},
@@ -314,20 +317,42 @@ func TestConnectedAPI(t *testing.T) {
 		call(t, buyer.ID, "POST", "/api/orders", gin.H{"product_id": p.ID, "quantity": -1, "payment_method": "manual"}, 400)
 		call(t, buyer.ID, "POST", "/api/orders", gin.H{"product_id": p.ID, "quantity": 6, "payment_method": "manual"}, 409)
 		call(t, buyer.ID, "POST", "/api/orders", gin.H{"product_id": uuid.NewString(), "quantity": 1, "payment_method": "manual"}, 404)
+		call(t, seller.ID, "POST", "/api/orders", gin.H{"product_id": p.ID, "quantity": 1, "payment_method": "manual"}, 403)
 		id := order(t, p, nil, 2)
 		call(t, seller.ID, "DELETE", "/api/products/"+p.ID, nil, 409)
 		call(t, seller.ID, "PATCH", "/api/products/"+p.ID, gin.H{"price": 120}, 200)
 		if stock(t, p.ID) != 3 {
 			t.Fatal("stock was not deducted")
 		}
-		for _, action := range []string{"pay", "cancel", "refund"} {
-			call(t, seller.ID, "POST", "/api/orders/"+id+"/"+action, gin.H{"payment_method": "manual", "refund_reason": "test"}, 404)
+		purchase := "/api/orders/" + id
+		sale := "/api/sales/orders/" + id
+		paymentInput := gin.H{"payment_method": "manual"}
+		refundInput := gin.H{"refund_reason": "Test refund"}
+		call(t, seller.ID, "POST", purchase+"/cancel", nil, 404)
+		call(t, other.ID, "GET", sale, nil, 404)
+		call(t, seller.ID, "GET", sale, nil, 200)
+		for _, path := range []string{sale, purchase} {
+			call(t, buyer.ID, "POST", path+"/pay", paymentInput, 403)
+			call(t, other.ID, "POST", path+"/pay", paymentInput, 404)
 		}
-		call(t, buyer.ID, "POST", "/api/orders/"+id+"/pay", gin.H{"payment_method": "manual"}, 200)
-		call(t, buyer.ID, "POST", "/api/orders/"+id+"/pay", gin.H{"payment_method": "manual"}, 409)
-		call(t, buyer.ID, "POST", "/api/orders/"+id+"/cancel", nil, 409)
-		call(t, buyer.ID, "POST", "/api/orders/"+id+"/refund", gin.H{"refund_reason": "Test refund"}, 200)
-		call(t, buyer.ID, "POST", "/api/orders/"+id+"/refund", gin.H{"refund_reason": "Retry"}, 409)
+		before := call(t, buyer.ID, "GET", purchase, nil, 200)
+		if before["status"] != "pending" || before["payment"].(map[string]interface{})["status"] != "pending" || stock(t, p.ID) != 3 {
+			t.Fatal("denied payments changed the order, payment, or stock")
+		}
+		call(t, seller.ID, "POST", sale+"/pay", paymentInput, 200)
+		call(t, seller.ID, "POST", sale+"/pay", paymentInput, 409)
+		call(t, buyer.ID, "POST", purchase+"/cancel", nil, 409)
+		for _, path := range []string{sale, purchase} {
+			call(t, buyer.ID, "POST", path+"/refund", refundInput, 403)
+			call(t, other.ID, "POST", path+"/refund", refundInput, 404)
+		}
+		before = call(t, buyer.ID, "GET", purchase, nil, 200)
+		if before["status"] != "paid" || before["payment"].(map[string]interface{})["status"] != "paid" || stock(t, p.ID) != 3 {
+			t.Fatal("denied refunds changed the order, payment, or stock")
+		}
+		call(t, seller.ID, "POST", sale+"/refund", gin.H{"refund_reason": "   "}, 400)
+		call(t, seller.ID, "POST", sale+"/refund", refundInput, 200)
+		call(t, seller.ID, "POST", sale+"/refund", refundInput, 409)
 		var payment models.Payment
 		db.First(&payment, "order_id = ?", id)
 		if stock(t, p.ID) != 5 || payment.Status != "refunded" || payment.Amount != 200 {
@@ -337,10 +362,14 @@ func TestConnectedAPI(t *testing.T) {
 		cancelID := order(t, p, nil, 1)
 		call(t, buyer.ID, "POST", "/api/orders/"+cancelID+"/cancel", nil, 200)
 		call(t, buyer.ID, "POST", "/api/orders/"+cancelID+"/cancel", nil, 409)
-		call(t, buyer.ID, "POST", "/api/orders/"+cancelID+"/pay", gin.H{"payment_method": "manual"}, 409)
+		call(t, seller.ID, "POST", "/api/sales/orders/"+cancelID+"/pay", paymentInput, 409)
 		if stock(t, p.ID) != 5 {
 			t.Fatal("repeated cancellation changed stock")
 		}
+		if err := db.Model(&models.Order{}).Where("id = ?", cancelID).Updates(map[string]interface{}{"user_id": seller.ID, "status": "pending"}).Error; err != nil {
+			t.Fatal(err)
+		}
+		call(t, seller.ID, "POST", "/api/sales/orders/"+cancelID+"/pay", paymentInput, 403)
 	})
 
 	t.Run("failed cancellation rolls back order and stock", func(t *testing.T) {
@@ -354,6 +383,52 @@ func TestConnectedAPI(t *testing.T) {
 		db.First(&stored, "id = ?", id)
 		if stored.Status != "pending" || stock(t, p.ID) != 0 {
 			t.Fatal("failed transaction left a changed order or stock")
+		}
+	})
+
+	t.Run("buyer cancellation and seller payment cannot both succeed", func(t *testing.T) {
+		p := product(t, seller.ID, 1)
+		id := order(t, p, nil, 1)
+		type result struct {
+			action string
+			code   int
+		}
+		results := make(chan result, 2)
+		start := make(chan struct{})
+		goAction := func(actor, path, action, body string) {
+			<-start
+			req, err := http.NewRequest("POST", server.URL+path, strings.NewReader(body))
+			if err != nil {
+				results <- result{action, 0}
+				return
+			}
+			req.Header.Set("Authorization", "Bearer "+tokens[actor])
+			req.Header.Set("Content-Type", "application/json")
+			res, err := client.Do(req)
+			if err != nil {
+				results <- result{action, 0}
+				return
+			}
+			defer res.Body.Close()
+			results <- result{action, res.StatusCode}
+		}
+		go goAction(seller.ID, "/api/sales/orders/"+id+"/pay", "paid", `{"payment_method":"manual"}`)
+		go goAction(buyer.ID, "/api/orders/"+id+"/cancel", "cancelled", "")
+		close(start)
+		first, second := <-results, <-results
+		if first.code != 200 {
+			first, second = second, first
+		}
+		if first.code != 200 || second.code != 409 {
+			t.Fatalf("unexpected concurrent results: %v / %v", first, second)
+		}
+		detail := call(t, buyer.ID, "GET", "/api/orders/"+id, nil, 200)
+		wantStock := 0
+		if first.action == "cancelled" {
+			wantStock = 1
+		}
+		if detail["status"] != first.action || detail["payment"].(map[string]interface{})["status"] != first.action || stock(t, p.ID) != wantStock {
+			t.Fatalf("order, payment, and stock disagree after concurrent updates: %v", detail)
 		}
 	})
 
@@ -463,8 +538,8 @@ func TestConnectedAPI(t *testing.T) {
 		call(t, seller.ID, "DELETE", path+"/"+p.ID, nil, 409)
 		call(t, buyer.ID, "POST", "/api/orders/"+id+"/cancel", nil, 200)
 		paidID := order(t, p, &liveID, 3)
-		call(t, buyer.ID, "POST", "/api/orders/"+paidID+"/pay", gin.H{"payment_method": "manual"}, 200)
-		call(t, buyer.ID, "POST", "/api/orders/"+paidID+"/refund", gin.H{"refund_reason": "Test"}, 200)
+		call(t, seller.ID, "POST", "/api/sales/orders/"+paidID+"/pay", gin.H{"payment_method": "manual"}, 200)
+		call(t, seller.ID, "POST", "/api/sales/orders/"+paidID+"/refund", gin.H{"refund_reason": "Test"}, 200)
 		call(t, seller.ID, "DELETE", path+"/"+p.ID, nil, 204)
 		if stock(t, p.ID) != 20 {
 			t.Fatal("removal did not return unsold live allocation")
@@ -556,7 +631,7 @@ func TestConnectedAPI(t *testing.T) {
 			t.Fatalf("live product snapshot: %v", item)
 		}
 		paidID := order(t, p, &liveID, 2)
-		call(t, buyer.ID, "POST", "/api/orders/"+paidID+"/pay", gin.H{"payment_method": "manual"}, 200)
+		call(t, seller.ID, "POST", "/api/sales/orders/"+paidID+"/pay", gin.H{"payment_method": "manual"}, 200)
 		pendingID := order(t, p, &liveID, 3)
 		liveMessage("end_live", liveID)
 		endedAt := call(t, "", "GET", livePath, nil, 200)["ended_at"]
@@ -581,7 +656,8 @@ func TestConnectedAPI(t *testing.T) {
 			t.Fatalf("offline purchase must use catalog price and stock: %v", offline)
 		}
 		call(t, buyer.ID, "POST", "/api/orders/"+pendingID+"/cancel", nil, 200)
-		call(t, buyer.ID, "POST", "/api/orders/"+paidID+"/refund", gin.H{"refund_reason": "Test refund"}, 200)
+		call(t, buyer.ID, "POST", "/api/sales/orders/"+paidID+"/refund", gin.H{"refund_reason": "Test refund"}, 403)
+		call(t, seller.ID, "POST", "/api/sales/orders/"+paidID+"/refund", gin.H{"refund_reason": "Test refund"}, 200)
 		if stock(t, p.ID) != 6 {
 			t.Fatal("live cancellation and refund after end must restore catalog stock")
 		}
@@ -603,6 +679,11 @@ func TestConnectedAPI(t *testing.T) {
 		assertOrders(buyer.ID, "/api/orders?channel=offline&status=pending", offlineID, "pending", true)
 		assertOrders(buyer.ID, "/api/orders?channel=live&status=refunded", paidID, "refunded", false)
 		assertOrders(seller.ID, "/api/sales/offline?status=pending", offlineID, "pending", true)
+		assertOrders(seller.ID, "/api/sales/orders?channel=live&status=refunded", paidID, "refunded", false)
+		assertOrders(seller.ID, "/api/sales/orders?channel=offline&status=pending", offlineID, "pending", true)
+		call(t, seller.ID, "GET", "/api/sales/orders/"+paidID, nil, 200)
+		call(t, buyer.ID, "GET", "/api/sales/orders/"+paidID, nil, 404)
+		call(t, seller.ID, "GET", "/api/sales/orders?channel=unknown", nil, 400)
 		if list := call(t, buyer.ID, "GET", "/api/sales/offline", nil, 200); list["total"] != float64(0) {
 			t.Fatalf("buyer received another seller's sales: %v", list)
 		}
