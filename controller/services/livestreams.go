@@ -40,6 +40,7 @@ type LivestreamProductView struct {
 	DiscountPrice float64 `json:"discount_price"`
 	StockQuantity int     `json:"stock_quantity"`
 	IsPinned      bool    `json:"is_pinned"`
+	Status        string  `json:"status"`
 }
 
 func livestreamViewQuery(query *gorm.DB) *gorm.DB {
@@ -59,7 +60,8 @@ func ListLivestreams(input LivestreamQuery) ([]LivestreamView, int64, error) {
 	}
 	if input.ProductID != "" {
 		product := config.DB.Model(&models.LivestreamProduct{}).Select("1").
-			Where("livestream_products.livestream_id = livestreams.id AND product_id = ?", input.ProductID)
+			Where("livestream_products.livestream_id = livestreams.id AND product_id = ?", input.ProductID).
+			Where("(livestreams.status <> ? OR livestream_products.status <> ?)", "start", removedLivestreamProduct)
 		query = query.Where("EXISTS (?)", product)
 	}
 	if term := strings.TrimSpace(input.Search); term != "" {
@@ -98,7 +100,7 @@ func ListLivestreamProducts(id string, page Pagination) ([]LivestreamProductView
 	}
 	items := make([]LivestreamProductView, 0)
 	err := query.Select(`id, product_id, product_name AS name, product_image AS image_url,
-		description, price_at_purchase AS original_price, discount_price, stock_quantity, is_pinned`).
-		Order("is_pinned DESC, id ASC").Offset(page.Offset()).Limit(page.PageSize).Find(&items).Error
+		description, price_at_purchase AS original_price, discount_price, stock_quantity, is_pinned, status`).
+		Order("status = 'removed', is_pinned DESC, id ASC").Offset(page.Offset()).Limit(page.PageSize).Find(&items).Error
 	return items, total, err
 }

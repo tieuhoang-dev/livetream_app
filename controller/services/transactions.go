@@ -37,7 +37,9 @@ func OrderProduct(userID, productID string, quantity int, livestreamID *string, 
 				return errors.New("livestream_not_active")
 			}
 			var product models.LivestreamProduct
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("livestream_id = ? AND product_id = ?", *livestreamID, productID).First(&product).Error; err != nil {
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("livestream_id = ? AND product_id = ? AND status <> ?", *livestreamID, productID, removedLivestreamProduct).
+				First(&product).Error; err != nil {
 				return lookupError(err, "product_not_found_in_livestream")
 			}
 			price, stock, updateModel = product.DiscountPrice, product.StockQuantity, &product
@@ -83,7 +85,7 @@ func ownedLivestream(tx *gorm.DB, userID, livestreamID string) (*models.Livestre
 }
 
 // Reserve stock for the live so ordinary and live orders cannot sell the same
-// units. Removing the live product returns its unsold stock to the product.
+// units. Taking a product off sale returns its unsold stock to the catalog.
 func AddProductToLivestream(userID, livestreamID, productID string, discountPrice float64, stockQuantity int, isPinned bool) error {
 	if stockQuantity <= 0 {
 		return errors.New("invalid_quantity")
@@ -100,7 +102,9 @@ func AddProductToLivestream(userID, livestreamID, productID string, discountPric
 			return errors.New("livestream_not_active")
 		}
 		var existing int64
-		if err := tx.Model(&models.LivestreamProduct{}).Where("livestream_id = ? AND product_id = ?", livestreamID, productID).Count(&existing).Error; err != nil {
+		if err := tx.Model(&models.LivestreamProduct{}).
+			Where("livestream_id = ? AND product_id = ? AND status <> ?", livestreamID, productID, removedLivestreamProduct).
+			Count(&existing).Error; err != nil {
 			return err
 		}
 		if existing > 0 {
@@ -129,7 +133,10 @@ func AddProductToLivestream(userID, livestreamID, productID string, discountPric
 	})
 }
 
-const closedLivestreamProduct = "closed"
+const (
+	closedLivestreamProduct  = "closed"
+	removedLivestreamProduct = "removed"
+)
 
 // EndLivestream returns unreserved stock to the catalog and keeps allocations
 // for orders that may still be cancelled or refunded after the live ends.
@@ -143,7 +150,7 @@ func EndLivestream(userID, livestreamID string) (*models.Livestream, error) {
 		}
 		var products []models.LivestreamProduct
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("livestream_id = ? AND status <> ?", live.ID, closedLivestreamProduct).
+			Where("livestream_id = ? AND status NOT IN ?", live.ID, []string{closedLivestreamProduct, removedLivestreamProduct}).
 			Order("product_id ASC, id ASC").Find(&products).Error; err != nil {
 			return err
 		}
@@ -187,11 +194,17 @@ func restoreCatalogStock(tx *gorm.DB, productID string, quantity int) error {
 
 func RemoveProductFromLivestream(userID, livestreamID, productID string) error {
 	return config.DB.Transaction(func(tx *gorm.DB) error {
-		if _, err := ownedLivestream(tx, userID, livestreamID); err != nil {
+		live, err := ownedLivestream(tx, userID, livestreamID)
+		if err != nil {
 			return err
 		}
+		if live.Status != "start" {
+			return errors.New("livestream_not_active")
+		}
 		var liveProduct models.LivestreamProduct
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("livestream_id = ? AND product_id = ?", livestreamID, productID).First(&liveProduct).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("livestream_id = ? AND product_id = ? AND status <> ?", livestreamID, productID, removedLivestreamProduct).
+			First(&liveProduct).Error; err != nil {
 			return lookupError(err, "product_not_found_in_livestream")
 		}
 		var activeOrders int64
@@ -205,7 +218,9 @@ func RemoveProductFromLivestream(userID, livestreamID, productID string) error {
 		if err := restoreCatalogStock(tx, productID, liveProduct.StockQuantity); err != nil {
 			return err
 		}
-		return tx.Delete(&liveProduct).Error
+		return tx.Model(&liveProduct).Updates(map[string]interface{}{
+			"stock_quantity": 0, "status": removedLivestreamProduct,
+		}).Error
 	})
 }
 
@@ -272,7 +287,8 @@ func restoreOrderItemStock(tx *gorm.DB, livestreamID *string, item models.OrderI
 		return restoreCatalogStock(tx, item.ProductID, item.Quantity)
 	}
 	var liveProduct models.LivestreamProduct
-	if err := tx.Take(&liveProduct, "livestream_id = ? AND product_id = ?", *livestreamID, item.ProductID).Error; err != nil {
+	// An allocation can be removed only after all its orders have settled.
+	if err := tx.Take(&liveProduct, "livestream_id = ? AND product_id = ? AND status <> ?", *livestreamID, item.ProductID, removedLivestreamProduct).Error; err != nil {
 		return lookupError(err, "product_not_found_in_livestream")
 	}
 	if liveProduct.Status == closedLivestreamProduct {

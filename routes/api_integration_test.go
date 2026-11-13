@@ -464,10 +464,31 @@ func TestConnectedAPI(t *testing.T) {
 		call(t, buyer.ID, "POST", "/api/orders/"+id+"/cancel", nil, 200)
 		paidID := order(t, p, &liveID, 3)
 		call(t, buyer.ID, "POST", "/api/orders/"+paidID+"/pay", gin.H{"payment_method": "manual"}, 200)
+		call(t, seller.ID, "DELETE", path+"/"+p.ID, nil, 409)
 		call(t, buyer.ID, "POST", "/api/orders/"+paidID+"/refund", gin.H{"refund_reason": "Test"}, 200)
 		call(t, seller.ID, "DELETE", path+"/"+p.ID, nil, 204)
 		if stock(t, p.ID) != 20 {
 			t.Fatal("removal did not return unsold live allocation")
+		}
+		call(t, seller.ID, "DELETE", path+"/"+p.ID, nil, 404)
+		call(t, buyer.ID, "POST", "/api/orders", gin.H{"product_id": p.ID, "quantity": 1, "livestream_id": liveID, "payment_method": "manual"}, 404)
+		history := call(t, "", "GET", path, nil, 200)["data"].([]interface{})
+		if len(history) != 1 {
+			t.Fatalf("removed product missing from live history: %v", history)
+		}
+		removed := history[0].(map[string]interface{})
+		if removed["id"] != attached.ID || removed["status"] != "removed" || removed["name"] != p.Name || removed["discount_price"] != float64(80) || removed["stock_quantity"] != float64(0) {
+			t.Fatalf("removed product snapshot changed: %v", removed)
+		}
+		filter := "/api/livestreams?product_id=" + p.ID
+		if call(t, "", "GET", filter, nil, 200)["total"] != float64(0) {
+			t.Fatal("a withdrawn product still appears in active live search")
+		}
+		call(t, seller.ID, "POST", path, gin.H{"product_id": p.ID, "discount_price": 70, "stock_quantity": 4}, 201)
+		relisted := order(t, p, &liveID, 2)
+		call(t, buyer.ID, "POST", "/api/orders/"+relisted+"/cancel", nil, 200)
+		if stock(t, p.ID) != 16 {
+			t.Fatal("cancelling an order for a relisted product affected catalog stock")
 		}
 		ws.WriteJSON(gin.H{"type": "end_live", "content": liveID})
 		if err := ws.ReadJSON(&response); err != nil || response["type"] != "end_live_success" {
@@ -475,6 +496,20 @@ func TestConnectedAPI(t *testing.T) {
 		}
 		assertJoin(liveID, "join_live_error")
 		call(t, seller.ID, "POST", path, payload, 409)
+		call(t, seller.ID, "DELETE", path+"/"+p.ID, nil, 409)
+		history = call(t, "", "GET", path, nil, 200)["data"].([]interface{})
+		if len(history) != 2 || history[0].(map[string]interface{})["status"] != "closed" ||
+			history[1].(map[string]interface{})["id"] != attached.ID || stock(t, p.ID) != 20 {
+			t.Fatalf("ended live did not preserve both allocations or restore stock exactly once: %v", history)
+		}
+		if call(t, "", "GET", filter+"&status=end", nil, 200)["total"] != float64(1) {
+			t.Fatal("ended live is missing from product history")
+		}
+		orderHistory := call(t, buyer.ID, "GET", "/api/orders/"+paidID, nil, 200)
+		orderLine := orderHistory["items"].([]interface{})[0].(map[string]interface{})
+		if orderHistory["status"] != "refunded" || orderLine["product_id"] != p.ID || orderLine["price_at_purchase"] != float64(80) {
+			t.Fatalf("product removal or relisting altered an earlier order: %v", orderHistory)
+		}
 		call(t, buyer.ID, "POST", "/api/orders", gin.H{"product_id": p.ID, "quantity": 1, "livestream_id": liveID, "payment_method": "manual"}, 409)
 	})
 
@@ -619,9 +654,10 @@ func TestConnectedAPI(t *testing.T) {
 		call(t, buyer.ID, "GET", "/api/sales/offline/"+offlineID, nil, 404)
 		call(t, seller.ID, "GET", "/api/orders/"+offlineID, nil, 404)
 		call(t, seller.ID, "GET", "/api/sales/offline/"+paidID, nil, 404)
-		call(t, seller.ID, "DELETE", livePath+"/products/"+p.ID, nil, 204)
-		if stock(t, p.ID) != 6 {
-			t.Fatal("removing an ended allocation must not restore stock again")
+		reply := call(t, seller.ID, "DELETE", livePath+"/products/"+p.ID, nil, 409)
+		endedProducts := call(t, "", "GET", livePath+"/products", nil, 200)["data"].([]interface{})
+		if reply["error"] != "livestream_not_active" || stock(t, p.ID) != 6 || len(endedProducts) != 1 || endedProducts[0].(map[string]interface{})["status"] != "closed" {
+			t.Fatalf("ended live allocation was not preserved: %v", endedProducts)
 		}
 	})
 
