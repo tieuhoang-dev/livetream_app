@@ -634,64 +634,14 @@ func HandleWS(ctx *gin.Context) {
 
 		case "end_live":
 
-			var liveStream models.Livestream
-
-			// FIX bug:
-			//
-			// Sai:
-			// id AND seller_id = ?
-			//
-			// Đúng:
-			// id = ? AND seller_id = ?
-
-			if err := DB.First(
-				&liveStream,
-				"id = ? AND seller_id = ?",
-				msg.Content,
-				uid.String(),
-			).Error; err != nil {
-
-				log.Printf(
-					"🔴 LiveStream không thuộc quyền sở hữu: %v",
-					err,
-				)
-
-				sendTo(
-					uid,
-					gin.H{
-						"type": "end_live_error",
-
-						"error": "Livestream không tồn tại hoặc không thuộc quyền sở hữu",
-					},
-				)
-
-				continue
-			}
-
-			liveStream.Status =
-				"end"
-
-			endedAt := time.Now()
-			liveStream.EndedAt = &endedAt
-
-			if err := DB.Save(
-				&liveStream,
-			).Error; err != nil {
-
-				log.Printf(
-					"🔴 Lỗi cập nhật livestream: %v",
-					err,
-				)
-
-				sendTo(
-					uid,
-					gin.H{
-						"type": "end_live_error",
-
-						"error": "Không thể kết thúc livestream",
-					},
-				)
-
+			liveStream, err := services.EndLivestream(uid.String(), msg.Content)
+			if err != nil {
+				message := "Không thể kết thúc livestream"
+				if err.Error() == "livestream_not_found" || err.Error() == "forbidden" {
+					message = "Livestream không tồn tại hoặc không thuộc quyền sở hữu"
+				}
+				log.Printf("🔴 Lỗi kết thúc livestream: %v", err)
+				sendTo(uid, gin.H{"type": "end_live_error", "error": message})
 				continue
 			}
 

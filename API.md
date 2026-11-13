@@ -62,12 +62,13 @@ Create trả 201; detail/update/stock trả 200. JSON trả các trường `id`,
 `created_at`, không trả object User hoặc thông tin xác thực của người bán.
 
 Danh sách nhận `page` (mặc định 1, tối đa 1,000,000), `page_size` (mặc định 20,
-tối đa 100), `seller_id` (UUID) và `q` (tìm một phần tên, tối đa 100 ký tự).
+tối đa 100), `seller_id` (UUID), `q` (tìm một phần tên, tối đa 100 ký tự)
+và `in_stock=true` để chỉ lấy sản phẩm còn hàng trong kho gốc.
 Sắp xếp mới nhất trước, theo `created_at DESC, id DESC`. Các ký tự `%`, `_`, `!`
 trong `q` được tìm như ký tự thường, không phải wildcard SQL.
 
 ```text
-GET /api/products?seller_id=<UUID>&page=1&page_size=20&q=ao
+GET /api/products?seller_id=<UUID>&page=1&page_size=20&q=ao&in_stock=true
 ```
 
 Response danh sách: `{ "data": [...], "total": 42, "page": 1, "page_size": 20 }`.
@@ -98,6 +99,10 @@ Tất cả route bên dưới yêu cầu JWT.
 
 | Method | Route | Body | Thành công |
 | --- | --- | --- | --- |
+| GET | `/api/orders` | Query `channel`, `status`, `page`, `page_size` | 200 |
+| GET | `/api/orders/:order_id` | Không cần | 200 |
+| GET | `/api/sales/offline` | Query `status`, `page`, `page_size` | 200 |
+| GET | `/api/sales/offline/:order_id` | Không cần | 200 |
 | POST | `/api/orders` | `product_id`, `quantity`, `payment_method`, tùy chọn `livestream_id` | 201 |
 | POST | `/api/orders/:order_id/pay` | `payment_method` | 200 |
 | POST | `/api/orders/:order_id/cancel` | Không cần | 200 |
@@ -115,8 +120,23 @@ Ví dụ tạo đơn:
 ```
 
 Response có `order_id`, `total_amount`, `status: "pending"`. Số lượng phải lớn
-hơn 0. Live phải đang `start` và có sản phẩm được gắn vào; giá mua trong live là
-`discount_price`. Sản phẩm gốc được tạo qua `POST /api/products`.
+hơn 0. Đơn offline là đơn mua từ danh mục ngoài livestream. Bỏ `livestream_id`
+để áp dụng giá và trừ kho gốc. Khi có `livestream_id`, phiên phải đang `start`
+và có sản phẩm được gắn vào. Đơn áp dụng `discount_price` và trừ kho của live.
+Sản phẩm gốc được tạo qua `POST /api/products`.
+
+`GET /api/orders` chỉ trả đơn của người mua đang đăng nhập. `channel` nhận
+`offline` hoặc `live`, mặc định trả cả hai. `GET /api/sales/offline` trả đơn
+ngoài live có các sản phẩm thuộc người bán đang đăng nhập. Cả hai danh sách
+nhận `status=pending|paid|cancelled|refunded` và dùng phân trang như danh mục.
+Thứ tự là `created_at DESC, id DESC`. Bản ghi gồm `id`, `livestream_id`,
+`total_amount`, `status`, `refund_reason`, `created_at` và `updated_at`.
+
+Các endpoint chi tiết thêm `items` với `product_id`, `name`, `image_url`,
+`quantity` và `price_at_purchase`. Tên và ảnh lấy từ danh mục hiện tại.
+`payment` gồm `payment_method`, `status` và `amount`, hoặc `null` nếu bản ghi
+thanh toán chưa có. Người bán xem đơn offline qua `/api/sales/offline`.
+Người mua thực hiện các thao tác trên đơn qua `/api/orders`.
 
 Chỉ chủ đơn được thanh toán, hủy hoặc hoàn đơn. Các chuyển trạng thái:
 
@@ -128,10 +148,32 @@ Order và Payment được cập nhật cùng transaction; thao tác lặp hoặ
 thái không hợp lệ bị từ chối. Các route pay/refund hiện chỉ ghi nhận trạng thái
 nội bộ, **chưa thu tiền/hoàn tiền qua cổng thanh toán**.
 
-## Sản phẩm trong live
+## Tìm livestream
 
-Tất cả route bên dưới yêu cầu JWT. Chỉ chủ live được thao tác, và chỉ được thêm
-sản phẩm thuộc tài khoản đó.
+| Method | Route | Công dụng | JWT |
+| --- | --- | --- | --- |
+| GET | `/api/livestreams` | Tìm và lọc phiên live | Không |
+| GET | `/api/livestreams/:livestream_id` | Chi tiết phiên live | Không |
+| GET | `/api/livestreams/:livestream_id/products` | Danh sách sản phẩm trong live | Không |
+
+Danh sách phiên nhận `q` (tìm theo tiêu đề, tối đa 100 ký tự), `seller_id` (UUID),
+`product_id` (UUID sản phẩm được gắn), `status=start|end|all` và
+`sort=newest|oldest`. Mặc định là `start` và `newest`. Thứ tự dùng `started_at`
+và `id` để phân trang ổn định khi hai phiên có cùng thời gian. Ví dụ
+`GET /api/livestreams?q=ao&status=start&sort=newest&page=1&page_size=20`.
+
+Danh sách live và danh sách sản phẩm trong live dùng `{data, total, page, page_size}`
+với mặc định trang 1, 20 bản ghi mỗi trang và tối đa 100 bản ghi mỗi trang.
+Chi tiết live trả `id`, `seller_id`, `seller_username`, `seller_avatar`, `title`,
+`status`, `started_at` và `ended_at`. Sản phẩm trong live trả `id`, `product_id`,
+`name`, `image_url`, `description`, `original_price`, `discount_price`,
+`stock_quantity` và `is_pinned`. Sản phẩm ghim đứng đầu. Dùng `product_id` khi
+đặt đơn. Live đã kết thúc vẫn đọc được theo ID, còn đặt đơn yêu cầu live đang mở.
+
+## Quản lý sản phẩm trong live
+
+Các route ghi yêu cầu JWT. Chỉ chủ live được thao tác và chỉ được thêm sản
+phẩm thuộc tài khoản đó.
 
 | Method | Route | Body | Thành công |
 | --- | --- | --- | --- |
@@ -148,6 +190,11 @@ Tạo/kết thúc live vẫn qua WebSocket với `type: "create_live"` (content 
 đề) và `type: "end_live"` (content là UUID live). Live mới lưu `ended_at = NULL`.
 `type: "join_live"` chỉ cho tham gia live có trạng thái `start`; live đã kết
 thúc hoặc không tồn tại trả `join_live_error`.
+
+Khi kết thúc live, kho chưa bán được trả về kho gốc trong cùng transaction.
+Hủy hoặc hoàn đơn sau đó trả hàng về kho gốc. Gửi lại `end_live` giữ nguyên
+`ended_at` và không trả kho lần nữa. Với phiên đã kết thúc trước bản cập nhật,
+gửi lại `end_live` từ tài khoản chủ live để trả phần kho còn giữ.
 
 ## Lỗi
 

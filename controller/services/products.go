@@ -35,6 +35,7 @@ type ProductQuery struct {
 	PageSize int    `form:"page_size" binding:"gte=1,lte=100"`
 	SellerID string `form:"seller_id" binding:"omitempty,uuid"`
 	Search   string `form:"q" binding:"max=100"`
+	InStock  bool   `form:"in_stock"`
 }
 
 func productPrice(price float64) (float64, error) {
@@ -98,8 +99,10 @@ func ListProducts(input ProductQuery) ([]models.Product, int64, error) {
 		query = query.Where("seller_id = ?", input.SellerID)
 	}
 	if term := strings.TrimSpace(input.Search); term != "" {
-		term = strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(term)
-		query = query.Where("name LIKE ? ESCAPE '!'", "%"+term+"%")
+		query = query.Where("name LIKE ? ESCAPE '!'", containsPattern(term))
+	}
+	if input.InStock {
+		query = query.Where("stock_quantity > 0")
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
