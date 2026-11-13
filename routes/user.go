@@ -39,6 +39,8 @@ func SetupUserRoutes(r *gin.Engine) {
 	publicLiveGroup.GET("/:livestream_id", controllers.GetLivestream)
 	publicLiveGroup.GET("/:livestream_id/products", controllers.ListLivestreamProducts)
 	liveGroup := r.Group("/api/livestreams", middlewares.AuthMiddleware())
+	liveGroup.GET("/:livestream_id/comments", controllers.ListLivestreamComments)
+	liveGroup.POST("/:livestream_id/comments", controllers.AddLivestreamComment)
 	liveGroup.POST("/:livestream_id/media-token", controllers.CreateLiveMediaSession)
 	liveGroup.POST("/:livestream_id/end", controllers.EndLive)
 	liveGroup.POST("/:livestream_id/products", controllers.AddProductToLivestream)
