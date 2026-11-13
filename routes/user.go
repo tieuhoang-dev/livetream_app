@@ -33,6 +33,10 @@ func SetupUserRoutes(r *gin.Engine) {
 	salesGroup := r.Group("/api/sales", middlewares.AuthMiddleware())
 	salesGroup.GET("/offline", controllers.ListOfflineSales)
 	salesGroup.GET("/offline/:order_id", controllers.GetOfflineSale)
+	salesGroup.GET("/orders", controllers.ListSellerOrders)
+	salesGroup.GET("/orders/:order_id", controllers.GetSellerOrder)
+	salesGroup.POST("/orders/:order_id/pay", controllers.PayOrder)
+	salesGroup.POST("/orders/:order_id/refund", controllers.RefundOrder)
 
 	publicLiveGroup := r.Group("/api/livestreams")
 	publicLiveGroup.GET("", controllers.ListLivestreams)

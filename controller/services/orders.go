@@ -50,28 +50,38 @@ func buyerOrders(db *gorm.DB, buyerID string) *gorm.DB {
 	return db.Model(&models.Order{}).Where("orders.user_id = ?", buyerID)
 }
 
-func sellerOfflineOrders(db *gorm.DB, sellerID string) *gorm.DB {
+func sellerOrders(db *gorm.DB, sellerID string) *gorm.DB {
 	items := db.Model(&models.OrderItem{}).Select("1").Where("order_items.order_id = orders.id")
 	otherItems := db.Model(&models.OrderItem{}).Select("1").
 		Joins("LEFT JOIN products ON products.id = order_items.product_id").
 		Where("order_items.order_id = orders.id AND (products.id IS NULL OR products.seller_id <> ?)", sellerID)
-	return db.Model(&models.Order{}).Where("orders.livestream_id IS NULL").
+	live := db.Model(&models.Livestream{}).Select("1").
+		Where("livestreams.id = orders.livestream_id AND livestreams.seller_id = ?", sellerID)
+	return db.Model(&models.Order{}).Where("(orders.livestream_id IS NULL OR EXISTS (?))", live).
 		Where("EXISTS (?) AND NOT EXISTS (?)", items, otherItems)
 }
 
-func ListOrders(buyerID string, input OrderQuery) ([]OrderView, int64, error) {
-	query := buyerOrders(config.DB, buyerID)
-	switch input.Channel {
+func filterOrderChannel(query *gorm.DB, channel string) *gorm.DB {
+	switch channel {
 	case "offline":
-		query = query.Where("orders.livestream_id IS NULL")
+		return query.Where("orders.livestream_id IS NULL")
 	case "live":
-		query = query.Where("orders.livestream_id IS NOT NULL")
+		return query.Where("orders.livestream_id IS NOT NULL")
 	}
-	return listOrders(query, input.Pagination, input.Status)
+	return query
+}
+
+func ListOrders(buyerID string, input OrderQuery) ([]OrderView, int64, error) {
+	return listOrders(filterOrderChannel(buyerOrders(config.DB, buyerID), input.Channel), input.Pagination, input.Status)
+}
+
+func ListSellerOrders(sellerID string, input OrderQuery) ([]OrderView, int64, error) {
+	query := sellerOrders(config.DB, sellerID).Where("orders.user_id <> ?", sellerID)
+	return listOrders(filterOrderChannel(query, input.Channel), input.Pagination, input.Status)
 }
 
 func ListOfflineSales(sellerID string, page Pagination, status string) ([]OrderView, int64, error) {
-	return listOrders(sellerOfflineOrders(config.DB, sellerID), page, status)
+	return listOrders(filterOrderChannel(sellerOrders(config.DB, sellerID), "offline"), page, status)
 }
 
 func listOrders(query *gorm.DB, page Pagination, status string) ([]OrderView, int64, error) {
@@ -92,7 +102,15 @@ func GetOrder(buyerID, orderID string) (*OrderDetail, error) {
 }
 
 func GetOfflineSale(sellerID, orderID string) (*OrderDetail, error) {
-	return getOrder(orderID, func(tx *gorm.DB) *gorm.DB { return sellerOfflineOrders(tx, sellerID) })
+	return getOrder(orderID, func(tx *gorm.DB) *gorm.DB {
+		return filterOrderChannel(sellerOrders(tx, sellerID), "offline")
+	})
+}
+
+func GetSellerOrder(sellerID, orderID string) (*OrderDetail, error) {
+	return getOrder(orderID, func(tx *gorm.DB) *gorm.DB {
+		return sellerOrders(tx, sellerID).Where("orders.user_id <> ?", sellerID)
+	})
 }
 
 func getOrder(orderID string, scope func(*gorm.DB) *gorm.DB) (*OrderDetail, error) {

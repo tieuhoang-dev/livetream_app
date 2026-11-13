@@ -2,6 +2,7 @@ package services
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"livesteam_app/config"
@@ -28,6 +29,7 @@ func OrderProduct(userID, productID string, quantity int, livestreamID *string, 
 		var price float64
 		var stock int
 		var updateModel interface{}
+		var sellerID string
 		if livestreamID != nil {
 			var live models.Livestream
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&live, "id = ?", *livestreamID).Error; err != nil {
@@ -36,6 +38,7 @@ func OrderProduct(userID, productID string, quantity int, livestreamID *string, 
 			if live.Status != "start" {
 				return errors.New("livestream_not_active")
 			}
+			sellerID = live.SellerID
 			var product models.LivestreamProduct
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("livestream_id = ? AND product_id = ?", *livestreamID, productID).First(&product).Error; err != nil {
 				return lookupError(err, "product_not_found_in_livestream")
@@ -46,7 +49,11 @@ func OrderProduct(userID, productID string, quantity int, livestreamID *string, 
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&product, "id = ?", productID).Error; err != nil {
 				return lookupError(err, "product_not_found")
 			}
+			sellerID = product.SellerID
 			price, stock, updateModel = product.Price, product.StockQuantity, &product
+		}
+		if sellerID == userID {
+			return errors.New("cannot_buy_own_product")
 		}
 		if stock < quantity {
 			return errors.New("insufficient_stock")
@@ -209,62 +216,97 @@ func RemoveProductFromLivestream(userID, livestreamID, productID string) error {
 	})
 }
 
-func ownedOrder(tx *gorm.DB, userID, orderID string) (*models.Order, error) {
+func lockOrder(scope *gorm.DB, orderID string) (*models.Order, error) {
 	var order models.Order
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND user_id = ?", orderID, userID).First(&order).Error; err != nil {
+	if err := scope.Clauses(clause.Locking{Strength: "UPDATE"}).Take(&order, "orders.id = ?", orderID).Error; err != nil {
 		return nil, lookupError(err, "order_not_found")
 	}
 	return &order, nil
 }
 
-func RefundOrder(userID, orderID, action, refundReason string) error {
+func lockSellerOrder(tx *gorm.DB, sellerID, orderID string) (*models.Order, error) {
+	order, err := lockOrder(sellerOrders(tx, sellerID), orderID)
+	if err != nil {
+		if err.Error() == "order_not_found" {
+			var buyerOrder models.Order
+			buyerErr := buyerOrders(tx, sellerID).Select("id").Take(&buyerOrder, "orders.id = ?", orderID).Error
+			if buyerErr == nil {
+				return nil, errors.New("forbidden")
+			}
+			if !errors.Is(buyerErr, gorm.ErrRecordNotFound) {
+				return nil, buyerErr
+			}
+		}
+		return nil, err
+	}
+	if order.UserID == sellerID {
+		return nil, errors.New("forbidden")
+	}
+	return order, nil
+}
+
+func CancelOrder(buyerID, orderID string) error {
 	return config.DB.Transaction(func(tx *gorm.DB) error {
-		order, err := ownedOrder(tx, userID, orderID)
+		order, err := lockOrder(buyerOrders(tx, buyerID), orderID)
 		if err != nil {
 			return err
 		}
-		switch action {
-		case "refund":
-			if order.Status != "paid" {
-				return errors.New("order_not_paid")
-			}
-			order.Status, order.RefundReason = "refunded", refundReason
-		case "cancel":
-			if order.Status != "pending" {
-				return errors.New("order_not_pending")
-			}
-			order.Status = "cancelled"
-		default:
-			return errors.New("invalid_action")
+		if order.Status != "pending" {
+			return errors.New("order_not_pending")
 		}
-		if err := tx.Save(order).Error; err != nil {
-			return err
-		}
-		var payment models.Payment
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&payment, "order_id = ?", orderID).Error; err != nil {
-			return lookupError(err, "payment_not_found")
-		}
-		if err := tx.Model(&payment).Update("status", order.Status).Error; err != nil {
-			return err
-		}
-		if order.LivestreamID != nil {
-			// Use the same lock order as ending the live or changing its allocations.
-			var live models.Livestream
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Take(&live, "id = ?", *order.LivestreamID).Error; err != nil {
-				return lookupError(err, "livestream_not_found")
-			}
-		}
-		var items []models.OrderItem
-		if err := tx.Where("order_id = ?", orderID).Order("product_id ASC, id ASC").Find(&items).Error; err != nil {
-			return err
-		}
-		for _, item := range items {
-			if err := restoreOrderItemStock(tx, order.LivestreamID, item); err != nil {
-				return err
-			}
-		}
-		return nil
+		order.Status = "cancelled"
+		return closeOrderAndRestoreStock(tx, order, "pending")
 	})
+}
+
+func RefundOrder(sellerID, orderID, refundReason string) error {
+	refundReason = strings.TrimSpace(refundReason)
+	if refundReason == "" {
+		return errors.New("invalid_refund_reason")
+	}
+	return config.DB.Transaction(func(tx *gorm.DB) error {
+		order, err := lockSellerOrder(tx, sellerID, orderID)
+		if err != nil {
+			return err
+		}
+		if order.Status != "paid" {
+			return errors.New("order_not_paid")
+		}
+		order.Status, order.RefundReason = "refunded", refundReason
+		return closeOrderAndRestoreStock(tx, order, "paid")
+	})
+}
+
+func closeOrderAndRestoreStock(tx *gorm.DB, order *models.Order, paymentStatus string) error {
+	var payment models.Payment
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&payment, "order_id = ?", order.ID).Error; err != nil {
+		return lookupError(err, "payment_not_found")
+	}
+	if payment.Status != paymentStatus {
+		return errors.New("order_already_processed")
+	}
+	if err := tx.Model(&payment).Update("status", order.Status).Error; err != nil {
+		return err
+	}
+	if err := tx.Model(order).Updates(map[string]interface{}{"status": order.Status, "refund_reason": order.RefundReason}).Error; err != nil {
+		return err
+	}
+	if order.LivestreamID != nil {
+		var live models.Livestream
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Take(&live, "id = ?", *order.LivestreamID).Error; err != nil {
+			return lookupError(err, "livestream_not_found")
+		}
+	}
+	var items []models.OrderItem
+	if err := tx.Where("order_id = ?", order.ID).Order("product_id ASC, id ASC").Find(&items).Error; err != nil {
+		return err
+	}
+	for _, item := range items {
+		if err := restoreOrderItemStock(tx, order.LivestreamID, item); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func restoreOrderItemStock(tx *gorm.DB, livestreamID *string, item models.OrderItem) error {
@@ -272,7 +314,8 @@ func restoreOrderItemStock(tx *gorm.DB, livestreamID *string, item models.OrderI
 		return restoreCatalogStock(tx, item.ProductID, item.Quantity)
 	}
 	var liveProduct models.LivestreamProduct
-	if err := tx.Take(&liveProduct, "livestream_id = ? AND product_id = ?", *livestreamID, item.ProductID).Error; err != nil {
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Take(&liveProduct, "livestream_id = ? AND product_id = ?", *livestreamID, item.ProductID).Error; err != nil {
 		return lookupError(err, "product_not_found_in_livestream")
 	}
 	if liveProduct.Status == closedLivestreamProduct {
@@ -282,9 +325,9 @@ func restoreOrderItemStock(tx *gorm.DB, livestreamID *string, item models.OrderI
 }
 
 // This records the internal payment status; it does not charge a payment gateway.
-func PayOrder(userID, orderID, paymentMethod string) error {
+func PayOrder(sellerID, orderID, paymentMethod string) error {
 	return config.DB.Transaction(func(tx *gorm.DB) error {
-		order, err := ownedOrder(tx, userID, orderID)
+		order, err := lockSellerOrder(tx, sellerID, orderID)
 		if err != nil {
 			return err
 		}
