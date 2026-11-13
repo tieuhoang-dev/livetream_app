@@ -40,6 +40,7 @@ type Client struct {
 
 	Done      chan struct{}
 	closeOnce sync.Once
+	liveRoom  string // Protected by liveCommentRooms.Mutex.
 }
 
 // ======================================================
@@ -160,6 +161,7 @@ func AddClient(
 	username string,
 	avatar string,
 	conn *websocket.Conn,
+	roomOnly bool,
 ) *Client {
 
 	c := &Client{
@@ -176,15 +178,14 @@ func AddClient(
 		Done: make(chan struct{}),
 	}
 
-	clientsMutex.Lock()
-
-	if old := clients[userID]; old != nil {
-		old.stop()
+	if !roomOnly {
+		clientsMutex.Lock()
+		if old := clients[userID]; old != nil {
+			old.stop()
+		}
+		clients[userID] = c
+		clientsMutex.Unlock()
 	}
-
-	clients[userID] = c
-
-	clientsMutex.Unlock()
 
 	go c.writer()
 
@@ -200,6 +201,7 @@ func RemoveClient(
 	expected *Client,
 ) {
 
+	expected.stop()
 	clientsMutex.Lock()
 
 	current := clients[userID]
@@ -213,7 +215,7 @@ func RemoveClient(
 
 	clientsMutex.Unlock()
 
-	expected.stop()
+	removeLiveCommentClient(expected)
 }
 
 // ======================================================
@@ -234,7 +236,10 @@ func sendTo(
 	if c == nil {
 		return false
 	}
+	return c.enqueue(payload)
+}
 
+func (c *Client) enqueue(payload interface{}) bool {
 	select {
 
 	case <-c.Done:
@@ -254,7 +259,7 @@ func sendTo(
 	default:
 		log.Printf(
 			"🟠 Send buffer full for %s, dropping message",
-			userID,
+			c.ID,
 		)
 
 		return false
@@ -339,11 +344,14 @@ func HandleWS(ctx *gin.Context) {
 		return
 	}
 
+	// A comments tab must not replace the account's direct chat connection.
+	roomOnly := ctx.Query("scope") == "live_comments"
 	client := AddClient(
 		uid,
 		user.Username,
 		user.Avatar,
 		ws,
+		roomOnly,
 	)
 
 	defer RemoveClient(
@@ -419,6 +427,9 @@ func HandleWS(ctx *gin.Context) {
 		// Không tin sender_id frontend gửi lên.
 		// Sender thật lấy từ JWT.
 		msg.SenderID = uid
+		if roomOnly && msg.Type != "join_live" && msg.Type != "live_comment" {
+			continue
+		}
 
 		switch msg.Type {
 
@@ -665,45 +676,9 @@ func HandleWS(ctx *gin.Context) {
 		// ==================================================
 
 		case "join_live":
-
-			var liveStream models.Livestream
-
-			if err := DB.First(
-				&liveStream,
-				"id = ? AND status = ?",
-				msg.Content,
-				"start",
-			).Error; err != nil {
-
-				log.Printf(
-					"🔴 Lỗi tìm livestream: %v",
-					err,
-				)
-
-				sendTo(
-					uid,
-					gin.H{
-						"type": "join_live_error",
-
-						"error": "Livestream không tồn tại hoặc đã kết thúc",
-					},
-				)
-
-				continue
-			}
-
-			ack := gin.H{
-				"type": "join_live_success",
-
-				"id": liveStream.ID,
-
-				"title": liveStream.Title,
-			}
-
-			sendTo(
-				uid,
-				ack,
-			)
+			joinLiveComments(ctx.Request.Context(), client, msg.Content)
+		case "live_comment":
+			sendLiveComment(ctx.Request.Context(), client, msg)
 		}
 	}
 }

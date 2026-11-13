@@ -666,6 +666,104 @@ func TestConnectedAPI(t *testing.T) {
 		}
 	})
 
+	t.Run("websocket comments fan out only within the joined live", func(t *testing.T) {
+		createLive := func() string {
+			t.Helper()
+			live := models.Livestream{ID: uuid.NewString(), SellerID: seller.ID, Title: "WebSocket comments", Status: "start", StartedAt: time.Now()}
+			if err := db.Create(&live).Error; err != nil {
+				t.Fatal(err)
+			}
+			return live.ID
+		}
+		liveID, otherID := createLive(), createLive()
+		path := "/api/livestreams/" + liveID
+		dial := func(user, scope string) *websocket.Conn {
+			t.Helper()
+			conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/api/auth/ws?token="+tokens[user]+"&scope="+scope, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { conn.Close() })
+			return conn
+		}
+		write := func(conn *websocket.Conn, input gin.H) {
+			t.Helper()
+			if err := conn.WriteJSON(input); err != nil {
+				t.Fatal(err)
+			}
+		}
+		read := func(conn *websocket.Conn, want string) gin.H {
+			t.Helper()
+			conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+			var message gin.H
+			if err := conn.ReadJSON(&message); err != nil {
+				t.Fatal(err)
+			}
+			if message["type"] != want {
+				t.Fatalf("want %s, got %v", want, message)
+			}
+			return message
+		}
+		join := func(conn *websocket.Conn, id, want string) {
+			t.Helper()
+			write(conn, gin.H{"type": "join_live", "content": id})
+			read(conn, want)
+		}
+
+		legacy := dial(seller.ID, "")
+		host := dial(seller.ID, "live_comments")
+		viewer := dial(buyer.ID, "live_comments")
+		other := dial(buyer.ID, "live_comments")
+		write(legacy, gin.H{"type": "text", "temp_id": "direct"})
+		if read(legacy, "message_error")["tempId"] != "direct" {
+			t.Fatal("room connection displaced the existing direct chat socket")
+		}
+		write(viewer, gin.H{"type": "live_comment", "content": "Before joining", "temp_id": "not-joined"})
+		if message := read(viewer, "live_comment_error"); message["error"] != "live_comment_not_joined" || message["temp_id"] != "not-joined" {
+			t.Fatalf("unexpected error: %v", message)
+		}
+		join(host, liveID, "join_live_success")
+		join(viewer, liveID, "join_live_success")
+		join(other, otherID, "join_live_success")
+		write(viewer, gin.H{"type": "live_comment", "content": "   ", "temp_id": "empty"})
+		if read(viewer, "live_comment_error")["error"] != "invalid_live_comment" {
+			t.Fatal("blank comment was accepted")
+		}
+		write(viewer, gin.H{"type": "live_comment", "content": "  Còn hàng không?  ", "temp_id": "first", "sender_id": seller.ID, "livestream_id": otherID})
+		sent := read(viewer, "live_comment")
+		received := read(host, "live_comment")
+		first := sent["comment"].(map[string]interface{})
+		if sent["temp_id"] != "first" || sent["livestream_id"] != liveID || received["temp_id"] != nil || received["comment"].(map[string]interface{})["id"] != first["id"] || first["username"] != buyer.Username || first["content"] != "Còn hàng không?" {
+			t.Fatalf("unexpected broadcast: %v / %v", sent, received)
+		}
+		// A reply on the other connection confirms there is no queued event from the first room.
+		join(other, otherID, "join_live_success")
+		join(other, liveID, "join_live_success")
+		viewer.Close()
+
+		second := call(t, seller.ID, "POST", path+"/comments", gin.H{"content": "Còn nhé"}, 201)
+		if read(host, "live_comment")["comment"].(map[string]interface{})["id"] != second["id"] {
+			t.Fatal("HTTP comment did not reach the WebSocket subscribers")
+		}
+		if read(other, "live_comment")["comment"].(map[string]interface{})["id"] != second["id"] {
+			t.Fatal("closing one tab interrupted the other tab's subscription")
+		}
+		reconnected := dial(buyer.ID, "live_comments")
+		join(reconnected, liveID, "join_live_success")
+		history := call(t, buyer.ID, "GET", path+"/comments?after="+first["id"].(string), nil, 200)
+		if len(history["data"].([]interface{})) != 1 || history["next_cursor"] != second["id"] {
+			t.Fatalf("history after reconnect: %v", history)
+		}
+
+		write(legacy, gin.H{"type": "end_live", "content": liveID})
+		read(legacy, "end_live_success")
+		write(reconnected, gin.H{"type": "live_comment", "content": "After end", "temp_id": "ended"})
+		if read(reconnected, "live_comment_error")["error"] != "livestream_not_active" {
+			t.Fatal("comment was accepted after the live ended")
+		}
+		join(reconnected, liveID, "join_live_error")
+	})
+
 	t.Run("LiveKit grants and ending a room", func(t *testing.T) {
 		live := models.Livestream{ID: uuid.NewString(), SellerID: seller.ID, Title: "Video permissions", Status: "start", StartedAt: time.Now()}
 		if err := db.Create(&live).Error; err != nil {
