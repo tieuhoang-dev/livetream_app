@@ -196,6 +196,22 @@ Hủy hoặc hoàn đơn sau đó trả hàng về kho gốc. Gửi lại `end_l
 `ended_at` và không trả kho lần nữa. Với phiên đã kết thúc trước bản cập nhật,
 gửi lại `end_live` từ tài khoản chủ live để trả phần kho còn giữ.
 
+## Bình luận trong live
+
+| Method | Route | Dữ liệu | JWT |
+| --- | --- | --- | --- |
+| GET | `/api/livestreams/:livestream_id/comments` | Query `after` tùy chọn | Có |
+| POST | `/api/livestreams/:livestream_id/comments` | `{"content":"Còn hàng không?"}` | Có |
+
+Bình luận được lưu theo từng phòng. Backend lấy tên người gửi từ tài khoản
+đã xác thực. Nội dung là văn bản từ 1 đến 300 ký tự sau khi bỏ khoảng trắng
+ở hai đầu. Khi phiên kết thúc, vẫn đọc được lịch sử và yêu cầu gửi mới trả `409`.
+
+Lần đọc đầu lấy tối đa 50 bình luận gần nhất theo thứ tự cũ đến mới. Response có
+`data`, `next_cursor` và `has_more`. Gửi `next_cursor` làm `after` để lấy các
+bình luận mới theo từng lượt. ID và cursor là chuỗi số. Frontend đọc phần mới
+mỗi 2,5 giây trong phiên đang mở.
+
 ## Video qua LiveKit
 
 | Method | Route | Body | JWT |

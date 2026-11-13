@@ -76,6 +76,7 @@ func TestConnectedAPI(t *testing.T) {
 		db.Exec("DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE user_id IN ?)", ids)
 		db.Exec("DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE user_id IN ?)", ids)
 		db.Where("user_id IN ?", ids).Delete(&models.Order{})
+		db.Exec("DELETE FROM livestream_comments WHERE livestream_id IN (SELECT id FROM livestreams WHERE seller_id IN ?)", ids)
 		db.Exec("DELETE FROM livestream_products WHERE livestream_id IN (SELECT id FROM livestreams WHERE seller_id IN ?)", ids)
 		db.Where("seller_id IN ?", ids).Delete(&models.Livestream{})
 		db.Where("seller_id IN ?", ids).Delete(&models.Product{})
@@ -621,6 +622,47 @@ func TestConnectedAPI(t *testing.T) {
 		call(t, seller.ID, "DELETE", livePath+"/products/"+p.ID, nil, 204)
 		if stock(t, p.ID) != 6 {
 			t.Fatal("removing an ended allocation must not restore stock again")
+		}
+	})
+
+	t.Run("comments are shared within one livestream", func(t *testing.T) {
+		newLive := func() string {
+			t.Helper()
+			live := models.Livestream{ID: uuid.NewString(), SellerID: seller.ID, Title: "Comments test", Status: "start", StartedAt: time.Now()}
+			if err := db.Create(&live).Error; err != nil {
+				t.Fatal(err)
+			}
+			return "/api/livestreams/" + live.ID
+		}
+		live := newLive()
+		path := live + "/comments"
+		call(t, "", "GET", path, nil, 401)
+		call(t, "", "POST", path, gin.H{"content": "Hi"}, 401)
+		call(t, buyer.ID, "GET", path+"?after=-1", nil, 400)
+		call(t, buyer.ID, "POST", path, gin.H{"content": "   "}, 400)
+		call(t, buyer.ID, "POST", path, gin.H{"content": strings.Repeat("ệ", 301)}, 400)
+		first := call(t, buyer.ID, "POST", path, gin.H{"content": "  Hàng còn không?  ", "username": "fake"}, 201)
+		if first["content"] != "Hàng còn không?" || first["username"] != buyer.Username || first["id"] == "" {
+			t.Fatalf("unexpected comment: %v", first)
+		}
+		all := call(t, seller.ID, "GET", path, nil, 200)
+		if len(all["data"].([]interface{})) != 1 || all["next_cursor"] != first["id"] || all["has_more"] != false {
+			t.Fatalf("unexpected comment history: %v", all)
+		}
+		second := call(t, seller.ID, "POST", path, gin.H{"content": "Còn hàng nhé"}, 201)
+		next := call(t, buyer.ID, "GET", path+"?after="+first["id"].(string), nil, 200)
+		if len(next["data"].([]interface{})) != 1 || next["next_cursor"] != second["id"] {
+			t.Fatalf("unexpected incremental result: %v", next)
+		}
+		other := call(t, buyer.ID, "GET", newLive()+"/comments", nil, 200)
+		if len(other["data"].([]interface{})) != 0 {
+			t.Fatalf("comments leaked to another room: %v", other)
+		}
+		call(t, seller.ID, "POST", live+"/end", nil, 200)
+		call(t, buyer.ID, "POST", path, gin.H{"content": "Kết thúc rồi?"}, 409)
+		afterEnd := call(t, buyer.ID, "GET", path, nil, 200)
+		if len(afterEnd["data"].([]interface{})) != 2 {
+			t.Fatalf("comment history after end: %v", afterEnd)
 		}
 	})
 
