@@ -23,6 +23,7 @@ import (
 	"livesteam_app/utils"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"golang.org/x/crypto/bcrypt"
@@ -40,6 +41,9 @@ func TestConnectedAPI(t *testing.T) {
 	}
 	t.Setenv("JWT_SECRET", "integration-test-secret-only")
 	t.Setenv("BREVO_API_KEY", "")
+	for _, key := range []string{"LIVEKIT_URL", "LIVEKIT_API_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"} {
+		t.Setenv(key, "")
+	}
 	t.Chdir(t.TempDir())
 	gin.SetMode(gin.TestMode)
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{DisableForeignKeyConstraintWhenMigrating: true, Logger: logger.Default.LogMode(logger.Silent)})
@@ -618,6 +622,80 @@ func TestConnectedAPI(t *testing.T) {
 		if stock(t, p.ID) != 6 {
 			t.Fatal("removing an ended allocation must not restore stock again")
 		}
+	})
+
+	t.Run("LiveKit grants and ending a room", func(t *testing.T) {
+		live := models.Livestream{ID: uuid.NewString(), SellerID: seller.ID, Title: "Video permissions", Status: "start", StartedAt: time.Now()}
+		if err := db.Create(&live).Error; err != nil {
+			t.Fatal(err)
+		}
+		path := "/api/livestreams/" + live.ID
+		publisher := gin.H{"role": "publisher"}
+		viewer := gin.H{"role": "viewer"}
+		call(t, "", "POST", path+"/media-token", viewer, 401)
+		call(t, buyer.ID, "POST", path+"/media-token", publisher, 403)
+		call(t, buyer.ID, "POST", path+"/media-token", gin.H{"role": "admin"}, 400)
+		call(t, buyer.ID, "POST", path+"/media-token", viewer, 503)
+		const secret = "isolated-livekit-test-secret"
+		parse := func(raw string) (jwt.MapClaims, error) {
+			token, err := jwt.Parse(raw, func(*jwt.Token) (interface{}, error) { return []byte(secret), nil }, jwt.WithIssuer("testkey"), jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired())
+			if err != nil {
+				return nil, err
+			}
+			return token.Claims.(jwt.MapClaims), nil
+		}
+		cleanupRequests := make(chan string, 2)
+		media := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var input struct {
+				Room string `json:"room"`
+			}
+			claims, err := parse(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+			if err != nil || r.Method != http.MethodPost || r.URL.Path != "/twirp/livekit.RoomService/DeleteRoom" || json.NewDecoder(r.Body).Decode(&input) != nil {
+				http.Error(w, "unexpected room request", 400)
+				return
+			}
+			grant, _ := claims["video"].(map[string]interface{})
+			if grant["roomCreate"] != true || grant["roomJoin"] != nil {
+				http.Error(w, "invalid admin grant", 403)
+				return
+			}
+			cleanupRequests <- input.Room
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer media.Close()
+		t.Setenv("LIVEKIT_URL", "wss://video.example.invalid")
+		t.Setenv("LIVEKIT_API_URL", media.URL)
+		t.Setenv("LIVEKIT_API_KEY", "testkey")
+		t.Setenv("LIVEKIT_API_SECRET", secret)
+		receive := func(user string, input gin.H, publish bool) string {
+			t.Helper()
+			result := call(t, user, "POST", path+"/media-token", input, 200)
+			claims, err := parse(result["token"].(string))
+			if err != nil {
+				t.Fatal(err)
+			}
+			grant := claims["video"].(map[string]interface{})
+			if result["url"] != "wss://video.example.invalid" || grant["room"] != "livemart-"+live.ID || grant["roomJoin"] != true || grant["canPublish"] != publish || grant["canSubscribe"] == publish || grant["canPublishData"] != false || grant["roomCreate"] != nil {
+				t.Fatalf("unexpected media grant: %v", grant)
+			}
+			if publish && fmt.Sprint(grant["canPublishSources"]) != "[camera microphone]" {
+				t.Fatalf("unexpected sources: %v", grant)
+			}
+			return claims["sub"].(string)
+		}
+		if receive(seller.ID, publisher, true) != "seller-"+seller.ID {
+			t.Fatal("publisher identity changed")
+		}
+		if receive(buyer.ID, viewer, false) == receive(buyer.ID, viewer, false) {
+			t.Fatal("viewer tabs must have independent identities")
+		}
+		call(t, buyer.ID, "POST", path+"/end", nil, 403)
+		result := call(t, seller.ID, "POST", path+"/end", nil, 200)
+		if result["status"] != "end" || result["media_closed"] != true || <-cleanupRequests != "livemart-"+live.ID {
+			t.Fatalf("unexpected end response: %v", result)
+		}
+		call(t, seller.ID, "POST", path+"/media-token", publisher, 409)
+		call(t, buyer.ID, "POST", path+"/media-token", viewer, 409)
 	})
 
 	t.Run("password reset uses a separate expiring single-use OTP", func(t *testing.T) {

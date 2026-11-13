@@ -196,6 +196,48 @@ Hủy hoặc hoàn đơn sau đó trả hàng về kho gốc. Gửi lại `end_l
 `ended_at` và không trả kho lần nữa. Với phiên đã kết thúc trước bản cập nhật,
 gửi lại `end_live` từ tài khoản chủ live để trả phần kho còn giữ.
 
+## Video qua LiveKit
+
+| Method | Route | Body | JWT |
+| --- | --- | --- | --- |
+| POST | `/api/livestreams/:livestream_id/media-token` | `{"role":"publisher"}` hoặc `{"role":"viewer"}` | Có |
+| POST | `/api/livestreams/:livestream_id/end` | Không cần | Có |
+
+Token media trả `{ "url": "wss://…", "token": "…" }`, có hiệu lực 90 giây
+để bắt đầu kết nối và chỉ dùng cho phòng được chỉ định. Chỉ chủ phiên được
+lấy token phát camera/micro. Người xem chỉ được nhận media. Mỗi lượt xem có
+identity riêng để nhiều tab có thể xem song song. Live đã kết thúc trả `409`,
+người phát sai quyền nhận `403`, cấu hình LiveKit bị thiếu trả `503`.
+
+Kết thúc phiên vẫn hỗ trợ lệnh WebSocket `end_live`. Cả hai đường đều cập nhật
+trạng thái, trả kho và yêu cầu LiveKit ngắt phòng. `media_closed: false` cho
+biết phiên đã kết thúc trong Go nhưng LiveKit chưa xác nhận đóng phòng. Chủ
+phiên có thể gọi lại endpoint kết thúc. Trên bản LiveKit tự host, token cũ
+có thể dùng lại đến khi hết hạn để kết nối, tùy cấu hình LiveKit. Backend chặn
+cấp token mới cho phiên đã kết thúc.
+
+### Chạy local trên Windows
+
+1. Tải `livekit-server.exe` từ [LiveKit Releases](https://github.com/livekit/livekit/releases)
+   và chạy `.\livekit-server.exe --dev` trong PowerShell.
+2. Thêm vào `.env` của backend rồi khởi động lại Go.
+
+   ```dotenv
+   LIVEKIT_URL=ws://127.0.0.1:7880
+   LIVEKIT_API_KEY=devkey
+   LIVEKIT_API_SECRET=secret
+   ```
+
+3. Mở frontend tại `http://localhost:5173`, đăng nhập và tạo phiên. Mở cửa sổ
+   ẩn danh bằng tài khoản thứ hai để xem trực tiếp trên cùng máy.
+
+Dùng HTTPS cho frontend và WSS cho LiveKit khi phát từ điện thoại hoặc qua
+Internet. `LIVEKIT_URL` phải truy cập được từ trình duyệt. Có thể đặt
+`LIVEKIT_API_URL` thành origin HTTP(S) nội bộ cho các lệnh quản lý phòng nếu
+khác origin client. Chỉ lưu API key và secret ở backend. Cặp `devkey`/`secret`
+dành cho localhost. Xem [cổng và firewall của LiveKit](https://docs.livekit.io/transport/self-hosting/ports-firewall/)
+khi tự host qua Internet.
+
 ## Lỗi
 
 - 400: body/UUID/phân trang/sản phẩm/số lượng/giá/OTP không hợp lệ hoặc OTP hết hạn.

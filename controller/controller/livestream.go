@@ -634,7 +634,7 @@ func HandleWS(ctx *gin.Context) {
 
 		case "end_live":
 
-			liveStream, err := services.EndLivestream(uid.String(), msg.Content)
+			liveStream, mediaClosed, err := services.EndLivestreamAndMedia(uid.String(), msg.Content)
 			if err != nil {
 				message := "Không thể kết thúc livestream"
 				if err.Error() == "livestream_not_found" || err.Error() == "forbidden" {
@@ -651,6 +651,8 @@ func HandleWS(ctx *gin.Context) {
 				"id": liveStream.ID,
 
 				"title": liveStream.Title,
+
+				"media_closed": mediaClosed,
 			}
 
 			sendTo(
