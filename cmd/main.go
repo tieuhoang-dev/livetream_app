@@ -29,10 +29,14 @@ func main() {
 	config.ConnectDatabase()
 	models.MigrateAll(config.DB)
 	config.ConnectMongoDB()
+	migrationCtx, cancelMigration := context.WithTimeout(context.Background(), 10*time.Minute)
+	if err := services.MigrateLegacyLivestreamComments(migrationCtx, config.DB, config.ChatCollection); err != nil {
+		log.Fatal("Live comment migration to MongoDB failed: ", err)
+	}
+	cancelMigration()
 	config.EnsureMongoIndexes()
 	controllers.SetDatabase(config.DB)
 	config.ConnectRedis()
-	go services.RunLivestreamCommentArchiver(context.Background(), config.DB, config.ChatCollection)
 	services.StartChatWorkers(50)
 
 	if err != nil {
