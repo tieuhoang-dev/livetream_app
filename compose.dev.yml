@@ -1,0 +1,43 @@
+# Local dependencies for `go run ./cmd/dev`; API/MySQL/MongoDB stay on the host.
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:${DEV_REDIS_PORT:-6379}:6379"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDISCLI_AUTH: ${REDIS_PASSWORD:-}
+    command:
+      - sh
+      - -ec
+      - |
+        if [ -n "$$REDIS_PASSWORD" ]; then
+          exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"
+        fi
+        exec redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -qx PONG"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  livekit:
+    image: livekit/livekit-server:v1.13.11
+    environment:
+      LIVEKIT_CONFIG: ${DEV_LIVEKIT_CONFIG:-}
+      NODE_IP: "127.0.0.1"
+    command: ["--dev", "--bind", "0.0.0.0"]
+    ports:
+      - "127.0.0.1:${DEV_LIVEKIT_PORT:-7880}:7880"
+      - "127.0.0.1:${DEV_LIVEKIT_TCP_PORT:-7881}:${DEV_LIVEKIT_TCP_PORT:-7881}/tcp"
+      - "127.0.0.1:${DEV_LIVEKIT_UDP_PORT:-7882}:${DEV_LIVEKIT_UDP_PORT:-7882}/udp"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-Y", "off", "-O", "/dev/null", "http://127.0.0.1:7880"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+volumes:
+  redis-data:

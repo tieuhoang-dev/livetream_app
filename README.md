@@ -1,0 +1,17 @@
+# Livestream API
+
+Go API dùng MySQL, MongoDB, Redis và LiveKit.
+
+## Chạy cùng Redis và LiveKit
+
+1. Cài Go 1.25 trở lên và mở Docker Desktop (Linux containers).
+2. Chuẩn bị `.env` từ `.env.example`; điền kết nối MySQL/MongoDB và các cấu hình ứng dụng đang dùng. Hai database này cần chạy sẵn.
+3. Tại thư mục repo, chạy:
+
+```sh
+go run ./cmd/dev
+```
+
+Windows có thể double-click **`start-dev.bat`**. Lệnh tự bật Redis/LiveKit còn thiếu bằng Docker, chờ sẵn sàng rồi chạy API. Lần đầu cần mạng để tải image. Nhấn **Ctrl+C** để dừng API và các container vừa được lệnh bật; dữ liệu Redis được giữ lại.
+
+[Cấu hình cổng, dịch vụ đang chạy sẵn và xử lý lỗi](docs/development.md) · [API](API.md) · [Postman](postman/README.md)
