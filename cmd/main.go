@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"livesteam_app/config"
 	"livesteam_app/models"
 	"livesteam_app/routes"
@@ -31,6 +32,7 @@ func main() {
 	config.EnsureMongoIndexes()
 	controllers.SetDatabase(config.DB)
 	config.ConnectRedis()
+	go services.RunLivestreamCommentArchiver(context.Background(), config.DB, config.ChatCollection)
 	services.StartChatWorkers(50)
 
 	if err != nil {

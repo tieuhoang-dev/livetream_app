@@ -9,4 +9,6 @@ type LivestreamComment struct {
 	Username     string    `gorm:"size:255;not null" json:"username"`
 	Content      string    `gorm:"size:300;not null" json:"content"`
 	CreatedAt    time.Time `json:"created_at"`
+	// The comment row is also a durable outbox for its MongoDB archive.
+	MongoSavedAt *time.Time `gorm:"index" json:"-"`
 }

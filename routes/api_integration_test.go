@@ -2,6 +2,7 @@ package routes_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 
 	"livesteam_app/config"
 	controllers "livesteam_app/controller/controller"
+	"livesteam_app/controller/services"
 	"livesteam_app/models"
 	"livesteam_app/routes"
 	"livesteam_app/utils"
@@ -26,6 +28,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -745,6 +750,47 @@ func TestConnectedAPI(t *testing.T) {
 		if len(afterEnd["data"].([]interface{})) != 2 {
 			t.Fatalf("comment history after end: %v", afterEnd)
 		}
+		t.Run("HTTP comments reach Mongo without filling a page", func(t *testing.T) {
+			uri := os.Getenv("TEST_MONGO_URI")
+			if uri == "" {
+				t.Skip("set TEST_MONGO_URI to verify HTTP live comments in MongoDB")
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
+			if err != nil {
+				t.Fatal(err)
+			}
+			collection := client.Database("live_comment_http_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]).Collection("chat_logs")
+			defer func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				collection.Database().Drop(ctx)
+				client.Disconnect(ctx)
+			}()
+			done := make(chan struct{})
+			go func() { defer close(done); services.RunLivestreamCommentArchiver(ctx, db, collection) }()
+			defer func() { cancel(); <-done }()
+			deadline := time.Now().Add(5 * time.Second)
+			for time.Now().Before(deadline) {
+				var doc struct {
+					Content string `bson:"content"`
+					Type    string `bson:"message_type"`
+				}
+				err := collection.FindOne(ctx, bson.M{"comment_id": first["id"], "livestream_id": strings.TrimPrefix(live, "/api/livestreams/")}).Decode(&doc)
+				if err == nil {
+					if doc.Content != first["content"] || doc.Type != "livestream_comment" {
+						t.Fatal("HTTP comment archived with wrong content/type")
+					}
+					return
+				}
+				if err != mongo.ErrNoDocuments {
+					t.Fatal(err)
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			t.Fatal("HTTP comment did not reach MongoDB without additional messages")
+		})
 	})
 
 	t.Run("LiveKit grants and ending a room", func(t *testing.T) {

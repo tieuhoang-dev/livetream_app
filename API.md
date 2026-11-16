@@ -212,6 +212,16 @@ Lần đọc đầu lấy tối đa 50 bình luận gần nhất theo thứ tự
 bình luận mới theo từng lượt. ID và cursor là chuỗi số. Frontend đọc phần mới
 mỗi 2,5 giây trong phiên đang mở.
 
+Mỗi bình luận được ghi ngay vào MySQL, sau đó worker đồng bộ nền sang MongoDB
+`livestream_app.chat_logs` với `message_type: "livestream_comment"` và `livestream_id`.
+Worker kiểm tra mỗi 500ms, kể cả khi chỉ có **một** tin. Giới hạn 50 ở API là
+số tin mỗi trang đọc; giới hạn lô đồng bộ là số tối đa, không phải số tối thiểu.
+
+Cột nội bộ `livestream_comments.mongo_saved_at` để trống cho đến khi MongoDB
+xác nhận lưu thành công. Mongo lỗi thì bình luận vẫn đọc được từ MySQL và sẽ
+được thử đồng bộ lại. ID Mongo cố định giúp tránh bản sao khi thử lại hoặc chạy
+nhiều API. Bình luận cũ chưa đồng bộ cũng được xử lý sau khi backend khởi động.
+
 ## Video qua LiveKit
 
 | Method | Route | Body | JWT |
