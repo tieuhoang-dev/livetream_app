@@ -1,8 +1,8 @@
 # Chạy môi trường local
 
-## Một lệnh chạy API, Redis và LiveKit
+## Một lệnh chạy API và Redis
 
-Mở Docker Desktop ở chế độ Linux containers. Cần Go 1.25 trở lên trên máy; MySQL và MongoDB vẫn dùng các kết nối trong `.env` và cần chạy sẵn.
+Cần Go 1.25 trở lên trên máy; MySQL và MongoDB dùng các kết nối trong `.env` và cần chạy sẵn. Mở Docker Desktop ở chế độ Linux containers nếu cần launcher tự bật Redis. Nếu Redis đã chạy và xác thực được, không cần Docker.
 
 ```sh
 go run ./cmd/dev
@@ -10,28 +10,28 @@ go run ./cmd/dev
 
 Trên Windows, có thể double-click `start-dev.bat` ở thư mục gốc repo. Cửa sổ giữ lại thông báo nếu khởi động lỗi.
 
-Lệnh nạp `.env`, ưu tiên biến môi trường đã đặt trong terminal. Nó kiểm tra Redis bằng `PING` có xác thực, kiểm tra LiveKit bằng API `ListRooms` có ký token. Dịch vụ đang chạy và xác thực được sẽ được dùng lại. Dịch vụ ở localhost chưa chạy được bật qua `compose.dev.yml`, sau đó API mới khởi động. Không tự thay thế dịch vụ từ xa hoặc dịch vụ đang chiếm cổng nhưng xác thực thất bại.
+Lệnh nạp `.env`, ưu tiên biến môi trường đã đặt trong terminal. Nó kiểm tra Redis bằng `PING` có xác thực và dùng lại Redis đang chạy. Nếu Redis ở localhost chưa chạy, lệnh bật Redis qua `compose.dev.yml`, chờ sẵn sàng rồi chạy API. Redis từ xa không truy cập được hoặc xác thực thất bại sẽ báo lỗi; launcher không tạo Redis khác thay thế.
 
-API được build vào `.dev/` rồi chạy trực tiếp. `Ctrl+C` dừng API và chỉ dừng các container mà lần chạy đó đã bật. MySQL/MongoDB và dịch vụ được dùng lại vẫn tiếp tục chạy. Redis dùng volume để giữ dữ liệu khi dừng hoặc khởi động lại.
+API được build vào `.dev/` rồi chạy trực tiếp. `Ctrl+C` dừng API và chỉ dừng Redis container mà lần chạy đó đã bật. MySQL/MongoDB và Redis được dùng lại vẫn tiếp tục chạy. Redis dùng volume để giữ dữ liệu khi dừng hoặc khởi động lại.
 
-## `.env` tối thiểu cho Redis/LiveKit local
+## `.env` cho Redis và LiveKit Cloud
 
 Giữ các cấu hình MySQL/MongoDB, JWT, email hiện tại. Đặt thêm:
 
 ```dotenv
 REDIS_ADDR=127.0.0.1:6379
 REDIS_PASSWORD=
-LIVEKIT_URL=ws://127.0.0.1:7880
-LIVEKIT_API_URL=http://127.0.0.1:7880
-LIVEKIT_API_KEY=devkey
-LIVEKIT_API_SECRET=secret
+LIVEKIT_URL=wss://your-project.livekit.cloud
+LIVEKIT_API_KEY=your-cloud-api-key
+LIVEKIT_API_SECRET=your-cloud-api-secret
+LIVEKIT_API_URL=
 ```
 
-`devkey`/`secret` chỉ là thông tin mẫu cho local. Có thể đặt key/secret khác; launcher truyền đúng cặp đó cho container. Nếu cả hai bỏ trống và room API ở localhost, launcher dùng cặp mẫu trên. Khi chạy API trực tiếp bằng `go run ./cmd`, các biến LiveKit trống vẫn tắt chức năng video như trước.
+Lấy URL/key/secret từ project LiveKit Cloud của bạn. Để `LIVEKIT_API_URL` trống: backend tự suy ra HTTPS từ URL WSS của Cloud. Nếu chuyển từ server local, xóa giá trị `http://localhost:7880` hoặc `http://127.0.0.1:7880` cũ ở biến này. API secret chỉ đặt ở backend.
 
-Container chỉ mở cổng trên `127.0.0.1`: Redis 6379, LiveKit HTTP/WebSocket 7880, WebRTC TCP 7881 và UDP 7882. Đổi cổng Redis/HTTP bằng `REDIS_ADDR` và `LIVEKIT_API_URL`; khi client URL cũng ở localhost, launcher đồng bộ cổng `LIVEKIT_URL`. Đổi cổng media bằng `DEV_LIVEKIT_TCP_PORT` / `DEV_LIVEKIT_UDP_PORT`.
+Launcher giữ nguyên các biến LiveKit trong `.env`; không tạo LiveKit container, không mở các cổng 7880/7881/7882, không gán `devkey/secret` và không gọi Cloud khi khởi động. Backend dùng cấu hình Cloud khi thực hiện các thao tác video. Bỏ trống cả bốn biến LiveKit sẽ tắt chức năng video như khi chạy API trực tiếp.
 
-Nếu đang dùng LiveKit Cloud hoặc server khác, giữ URL/key/secret đang dùng. Khi có domain WSS công khai và API nội bộ riêng, cấu hình cả `LIVEKIT_URL=wss://...` và `LIVEKIT_API_URL=http://127.0.0.1:7880`. Launcher giữ URL công khai, nhưng container mặc định chỉ phục vụ thử nghiệm trên cùng máy. Để điện thoại xem video từ mạng khác, cần triển khai LiveKit có địa chỉ media truy cập được và cấu hình HTTPS/WSS, ICE/TURN phù hợp; forward cổng 7880 riêng chưa đủ cho WebRTC.
+Redis container chỉ mở cổng trên `127.0.0.1`, mặc định 6379. Đổi cổng bằng `REDIS_ADDR=127.0.0.1:<port>`. Nếu đã chạy bản launcher cũ, có thể dừng LiveKit container cũ trong Docker Desktop; launcher mới chỉ quản lý Redis.
 
 ## Chỉ bật hoặc dừng dependencies
 
@@ -40,15 +40,16 @@ go run ./cmd/dev -services-only
 go run ./cmd/dev -stop
 ```
 
-`-services-only` để container tiếp tục chạy và không chạy API. `-stop` chủ động dừng Redis/LiveKit thuộc Compose project hiện tại; không xóa volume, không dừng server native hoặc project Docker khác. Khi lần chạy API tiếp theo dùng lại các container này, `Ctrl+C` sẽ để chúng chạy tiếp.
+`-services-only` để Redis container tiếp tục chạy và không chạy API. `-stop` chủ động dừng Redis thuộc Compose project hiện tại; không xóa volume, không dừng server native hoặc project Docker khác. Khi lần chạy API tiếp theo dùng lại Redis này, `Ctrl+C` sẽ để nó chạy tiếp.
 
 Project mặc định là `livemart-dev`; đổi bằng `DEV_COMPOSE_PROJECT` nếu cần nhiều checkout. Redis volume thuộc project này. Tránh chạy nhiều API cùng lúc với cùng project/cổng.
 
 ## Khi không khởi động được
 
 - **Docker chưa sẵn sàng:** mở Docker Desktop và đợi engine chạy; kiểm tra `docker info` và `docker compose version` trong terminal.
-- **Dịch vụ đang có nhưng xác thực thất bại:** kiểm tra `REDIS_PASSWORD`, `LIVEKIT_API_KEY` và `LIVEKIT_API_SECRET` có khớp server đang chạy. Launcher sẽ dừng tại đây.
-- **Container không bật được:** kiểm tra cổng Redis, LiveKit và cả TCP/UDP media có đang bị chương trình khác dùng không.
+- **Redis đang có nhưng xác thực thất bại:** kiểm tra `REDIS_PASSWORD` có khớp Redis đang chạy. Launcher sẽ dừng tại đây.
+- **Redis container không bật được:** xem thông báo Docker và kiểm tra cổng trong `REDIS_ADDR` có bị chương trình khác dùng không.
+- **Video Cloud lỗi:** kiểm tra URL/key/secret Cloud trong `.env` và giá trị `LIVEKIT_API_URL` cũ; launcher không kiểm tra kết nối Cloud thay cho các API video.
 - **MySQL/MongoDB không kết nối được:** kiểm tra database hiện tại và URL trong `.env`; launcher không tạo database thay thế.
 
 Xem trạng thái/log khi cần (thay tên project nếu đã cấu hình khác):

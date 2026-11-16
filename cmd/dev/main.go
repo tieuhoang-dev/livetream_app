@@ -1,4 +1,4 @@
-// Command dev starts local Redis/LiveKit dependencies, then the host API.
+// Command dev starts local Redis, then the host API with its LiveKit Cloud settings.
 package main
 
 import (
@@ -24,8 +24,8 @@ func main() {
 }
 
 func run() (result error) {
-	servicesOnly := flag.Bool("services-only", false, "start Redis/LiveKit and leave them running, without the API")
-	stop := flag.Bool("stop", false, "stop this Compose project's Redis/LiveKit, keeping Redis data")
+	servicesOnly := flag.Bool("services-only", false, "start Redis and leave it running, without the API")
+	stop := flag.Bool("stop", false, "stop this Compose project's Redis, keeping its data")
 	flag.Parse()
 	if *servicesOnly && *stop {
 		return errors.New("chi chon mot trong -services-only va -stop")
@@ -71,7 +71,7 @@ func run() (result error) {
 	}
 	if *servicesOnly {
 		keep = true
-		fmt.Println("[dev] Dependencies dang chay. Dung bang: go run ./cmd/dev -stop")
+		fmt.Println("[dev] Redis dang chay. Dung bang: go run ./cmd/dev -stop")
 		return nil
 	}
 	binDir := filepath.Join(root, ".dev")

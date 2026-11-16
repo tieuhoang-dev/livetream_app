@@ -5,78 +5,51 @@ import (
 	"errors"
 	"io"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/golang-jwt/jwt/v5"
 )
 
 func freePort(t *testing.T) string {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer l.Close()
-	return strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
+	defer listener.Close()
+	return strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
 }
 
 func localConfig(t *testing.T) *Config {
 	t.Helper()
-	c, err := FromEnv(".", map[string]string{"REDIS_ADDR": "127.0.0.1:" + freePort(t), "LIVEKIT_URL": "ws://127.0.0.1:" + freePort(t)})
+	c, err := FromEnv(".", map[string]string{"REDIS_ADDR": "127.0.0.1:" + freePort(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return c
 }
 
-func TestRoomProbeAuthenticatesAndRejectsHTTPFailures(t *testing.T) {
-	c := localConfig(t)
-	status, body := http.StatusOK, `{"rooms":[]}`
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" || r.URL.Path != "/twirp/livekit.RoomService/ListRooms" {
-			t.Error("incorrect room API request")
-		}
-		token, err := jwt.Parse(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), func(token *jwt.Token) (interface{}, error) { return []byte(c.Secret), nil }, jwt.WithValidMethods([]string{"HS256"}), jwt.WithIssuer(c.Key))
-		if err != nil || !token.Valid {
-			t.Error("invalid probe authentication")
-		}
-		claims, _ := token.Claims.(jwt.MapClaims)
-		grant, _ := claims["video"].(map[string]interface{})
-		if grant["roomList"] != true {
-			t.Error("roomList grant missing")
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(status)
-		io.WriteString(w, body)
-	}))
-	defer server.Close()
-	c.LiveAPI, _ = origin(server.URL, "http", "https")
-	s := New(c, io.Discard)
-	if err := s.checkLiveKit(context.Background()); err != nil {
+func TestOccupiedServiceNeverStartsDocker(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
 		t.Fatal(err)
 	}
-	status = http.StatusUnauthorized
-	if err := s.checkLiveKit(context.Background()); err == nil {
-		t.Fatal("authentication failure accepted")
-	}
-	status, body = http.StatusOK, "<html>another application</html>"
-	if err := s.checkLiveKit(context.Background()); err == nil {
-		t.Fatal("non-LiveKit HTTP response accepted")
-	}
-}
-
-func TestOccupiedServiceNeverStartsDocker(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Error(w, "denied", http.StatusUnauthorized) }))
-	defer server.Close()
+	defer listener.Close()
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			io.WriteString(conn, "-ERR not a Redis service\r\n")
+			conn.Close()
+		}
+	}()
 	c := localConfig(t)
-	c.LiveAPI, _ = origin(server.URL, "http", "https")
+	c.RedisAddr = listener.Addr().String()
 	s := New(c, io.Discard)
 	s.Run = func(context.Context, string, []string, []string) error {
-		t.Fatal("must not start Docker over an occupied service")
+		t.Fatal("must not start Docker over occupied Redis")
 		return nil
 	}
 	if err := s.Start(context.Background()); err == nil {
@@ -99,7 +72,7 @@ func TestPartialStartupCleanupAndDockerUnavailable(t *testing.T) {
 					return errors.New("daemon unavailable")
 				}
 				if strings.Contains(command, " up ") {
-					return errors.New("one container could not start")
+					return errors.New("container could not start")
 				}
 				return nil
 			}
@@ -111,10 +84,13 @@ func TestPartialStartupCleanupAndDockerUnavailable(t *testing.T) {
 			}
 			joined := strings.Join(commands, "\n")
 			if daemonFailure && len(commands) != 1 {
-				t.Fatal("cleanup touched containers when Docker never started")
+				t.Fatal("cleanup touched containers before Docker started")
 			}
-			if !daemonFailure && !strings.Contains(joined, "stop --timeout 8 redis livekit") {
-				t.Fatal("partial startup was not cleaned up")
+			if !daemonFailure && !strings.Contains(joined, "stop --timeout 8 redis") {
+				t.Fatal("partial startup not cleaned up")
+			}
+			if strings.Contains(joined, "livekit") {
+				t.Fatal("Docker command attempted to manage LiveKit")
 			}
 			before := len(commands)
 			s.Stop()
@@ -138,26 +114,18 @@ func TestCancelledStartDoesNotInvokeDocker(t *testing.T) {
 	}
 }
 
-func TestUnreachableRemoteIsNotReplaced(t *testing.T) {
-	for _, service := range []string{"redis", "livekit"} {
-		t.Run(service, func(t *testing.T) {
-			c := localConfig(t)
-			if service == "redis" {
-				c.RedisAddr = "devstack-unreachable.invalid:6379"
-			} else {
-				c.LiveAPI, _ = origin("http://devstack-unreachable.invalid:7880", "http", "https")
-			}
-			s := New(c, io.Discard)
-			s.Run = func(context.Context, string, []string, []string) error {
-				t.Fatal("remote service must not be replaced by Docker")
-				return nil
-			}
-			if err := s.Start(context.Background()); err == nil {
-				t.Fatal("unreachable remote accepted")
-			}
-			if err := s.Stop(); err != nil {
-				t.Fatal(err)
-			}
-		})
+func TestUnreachableRemoteRedisIsNotReplaced(t *testing.T) {
+	c := localConfig(t)
+	c.RedisAddr = "devstack-unreachable.invalid:6379"
+	s := New(c, io.Discard)
+	s.Run = func(context.Context, string, []string, []string) error {
+		t.Fatal("remote Redis must not be replaced by Docker")
+		return nil
+	}
+	if err := s.Start(context.Background()); err == nil {
+		t.Fatal("unreachable remote accepted")
+	}
+	if err := s.Stop(); err != nil {
+		t.Fatal(err)
 	}
 }
