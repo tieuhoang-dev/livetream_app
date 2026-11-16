@@ -105,7 +105,14 @@ func EnsureMongoIndexes() {
 		},
 	}
 
-	_, err := ChatCollection.Indexes().CreateOne(ctx, indexModel)
+	_, err := ChatCollection.Indexes().CreateMany(ctx, []mongo.IndexModel{
+		indexModel,
+		{
+			Keys: bson.D{{Key: "livestream_id", Value: 1}, {Key: "sequence", Value: 1}},
+			Options: options.Index().SetName("live_comment_sequence").SetUnique(true).
+				SetPartialFilterExpression(bson.M{"message_type": "livestream_comment", "sequence": bson.M{"$exists": true}}),
+		},
+	})
 	if err != nil {
 		log.Printf("Warning: Failed to create index for ChatCollection: %v", err)
 	} else {

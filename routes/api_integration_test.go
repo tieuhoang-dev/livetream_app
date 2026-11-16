@@ -2,6 +2,7 @@ package routes_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -26,6 +27,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
@@ -60,6 +64,28 @@ func TestConnectedAPI(t *testing.T) {
 		sqlDB, _ := db.DB()
 		sqlDB.Close()
 	})
+	if uri := os.Getenv("TEST_MONGO_URI"); uri != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := client.Ping(ctx, nil); err != nil {
+			t.Fatal(err)
+		}
+		collection := client.Database("live_comment_http_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]).Collection("chat_logs")
+		oldCollection := config.ChatCollection
+		config.ChatCollection = collection
+		t.Cleanup(func() {
+			config.ChatCollection = oldCollection
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			collection.Database().Drop(ctx)
+			client.Disconnect(ctx)
+		})
+		config.EnsureMongoIndexes()
+	}
 	password := "Local-test-password-123"
 	hash, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
 	newUser := func() models.User {
@@ -76,7 +102,6 @@ func TestConnectedAPI(t *testing.T) {
 		db.Exec("DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE user_id IN ?)", ids)
 		db.Exec("DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE user_id IN ?)", ids)
 		db.Where("user_id IN ?", ids).Delete(&models.Order{})
-		db.Exec("DELETE FROM livestream_comments WHERE livestream_id IN (SELECT id FROM livestreams WHERE seller_id IN ?)", ids)
 		db.Exec("DELETE FROM livestream_products WHERE livestream_id IN (SELECT id FROM livestreams WHERE seller_id IN ?)", ids)
 		db.Where("seller_id IN ?", ids).Delete(&models.Livestream{})
 		db.Where("seller_id IN ?", ids).Delete(&models.Product{})
@@ -707,6 +732,9 @@ func TestConnectedAPI(t *testing.T) {
 	})
 
 	t.Run("comments are shared within one livestream", func(t *testing.T) {
+		if os.Getenv("TEST_MONGO_URI") == "" {
+			t.Skip("set TEST_MONGO_URI for Mongo comment HTTP tests")
+		}
 		newLive := func() string {
 			t.Helper()
 			live := models.Livestream{ID: uuid.NewString(), SellerID: seller.ID, Title: "Comments test", Status: "start", StartedAt: time.Now()}
@@ -745,6 +773,17 @@ func TestConnectedAPI(t *testing.T) {
 		if len(afterEnd["data"].([]interface{})) != 2 {
 			t.Fatalf("comment history after end: %v", afterEnd)
 		}
+		var doc models.LivestreamComment
+		if err := config.ChatCollection.FindOne(context.Background(), bson.M{"_id": "live-comment:" + strings.TrimPrefix(live, "/api/livestreams/") + ":" + first["id"].(string)}).Decode(&doc); err != nil {
+			t.Fatal(err)
+		}
+		if doc.Content != first["content"] || doc.MessageType != "livestream_comment" {
+			t.Fatal("HTTP response returned before Mongo persisted the comment")
+		}
+		if db.Migrator().HasTable("livestream_comments") {
+			t.Fatal("HTTP comments created SQL content storage")
+		}
+
 	})
 
 	t.Run("LiveKit grants and ending a room", func(t *testing.T) {

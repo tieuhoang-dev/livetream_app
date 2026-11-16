@@ -212,6 +212,21 @@ Lần đọc đầu lấy tối đa 50 bình luận gần nhất theo thứ tự
 bình luận mới theo từng lượt. ID và cursor là chuỗi số. Frontend đọc phần mới
 mỗi 2,5 giây trong phiên đang mở.
 
+Bình luận được gửi và đọc **trực tiếp từ MongoDB** `livestream_app.chat_logs`,
+với `message_type: "livestream_comment"` và `livestream_id`. POST chỉ trả `201`
+sau khi MongoDB xác nhận lưu, kể cả khi chỉ gửi một tin. Mongo lỗi thì API báo
+lỗi; nội dung không được ghi sang SQL. Giới hạn 50 chỉ là kích thước trang đọc.
+
+SQL giữ tài khoản, quan hệ và trạng thái phiên live để kiểm tra quyền. Schema
+SQL mới không tạo bảng `livestream_comments`. Bộ đếm trong MongoDB
+`chat_counters` giữ ID/cursor dạng chuỗi số để FE tiếp tục dùng API hiện tại.
+
+Khi nâng cấp, dừng backend cũ trước rồi chạy bản mới: nếu bảng bình luận SQL cũ
+còn tồn tại, backend chuyển lịch sử sang MongoDB trước khi mở API. ID, tên,
+nội dung và thời gian được giữ lại; tiến độ chuyển nằm trong `chat_migrations`
+để có thể tiếp tục khi chạy lại. Bảng SQL cũ được giữ làm bản sao dữ liệu cũ,
+không được API dùng để đọc hoặc ghi bình luận sau khi chuyển xong.
+
 ## Video qua LiveKit
 
 | Method | Route | Body | JWT |
