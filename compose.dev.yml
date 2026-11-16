@@ -1,0 +1,27 @@
+# Local Redis for `go run ./cmd/dev`. Video uses LiveKit Cloud from the API's .env.
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:${DEV_REDIS_PORT:-6379}:6379"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDISCLI_AUTH: ${REDIS_PASSWORD:-}
+    command:
+      - sh
+      - -ec
+      - |
+        if [ -n "$$REDIS_PASSWORD" ]; then
+          exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"
+        fi
+        exec redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -qx PONG"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+volumes:
+  redis-data:
