@@ -222,3 +222,9 @@ Internet/provider đang hoạt động; chưa nằm trong HTTP regression tự �
 Trên trình duyệt, chọn Nhập địa chỉ hoặc Sử dụng vị trí hiện tại. Người bán
 xác nhận địa chỉ phiên ở bước Bắt đầu phát; GET/PUT `/api/livestreams/:id/pickup`
 chỉ dành cho chủ phiên. Địa chỉ `location_mode=current` phải có đủ tọa độ.
+
+Nếu shop đang live nhưng thiếu phí ship, chủ phiên có thể gửi PUT
+`/api/livestreams/{{live_id}}/pickup` với `pickup_address` đầy đủ và
+`shipping_rates` gồm cả `same_province_fee`, `other_province_fee` (xem API.md).
+Địa chỉ và phí lưu cùng transaction. Quote chỉ cần `delivery.province_code`;
+tạo đơn vẫn cần địa chỉ đầy đủ và payment_method.
