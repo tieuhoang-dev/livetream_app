@@ -2,6 +2,9 @@
 
 Base URL khi chạy local: `http://localhost:8080`.
 
+Danh sách live trên FE dùng WebSocket công khai `/api/livestreams/ws` theo
+hợp đồng bên dưới. REST danh sách được giữ để tương thích client cũ.
+
 Các route được bảo vệ nhận header `Authorization: Bearer <JWT>` từ API login.
 User phải được xác thực email và có trạng thái `active`. User ID luôn lấy từ JWT,
 không lấy từ request body. WebSocket vẫn giữ route `/api/auth/ws` và hỗ trợ
@@ -354,3 +357,40 @@ là lựa chọn FE; `manual` còn được nhận cho client cũ.
 
 Collection Postman và Test Studio đã có SHIP-001 để cấu hình phí 0 **cho tài
 khoản test** trước các case đơn cũ; payload đặt hàng đã có địa chỉ.
+
+## Danh sách live qua WebSocket
+
+Mở `ws://localhost:8080/api/livestreams/ws` (production HTTPS dùng `wss://`).
+Đây là kênh chỉ đọc, không cần JWT và không thay kết nối chat `/api/auth/ws`.
+Gửi message sau để nhận danh sách và đăng ký cập nhật cùng bộ lọc:
+
+```json
+{
+  "type": "list_lives",
+  "request_id": "catalog-1",
+  "query": {
+    "status": "start",
+    "sort": "newest",
+    "q": "",
+    "page": 1,
+    "page_size": 12
+  }
+}
+```
+
+Response có `type: "list_lives_success"`, cùng `request_id`, và các trường
+`data`, `total`, `page`, `page_size` giống REST. Mặc định `start`, `newest`,
+trang 1, 20 dòng; `page_size` từ 1–100. `query` còn nhận `seller_id`,
+`product_id` là UUID. `status` nhận `start/end/all`, `sort` nhận `newest/oldest`.
+Bộ lọc sai trả `list_lives_error` với `error: "invalid_query"` và không thay
+subscription hợp lệ trước đó. Request mới hợp lệ thay subscription cũ.
+
+Khi tạo/kết thúc live hoặc thêm/xóa sản phẩm khỏi live thành công, server đẩy
+lại snapshot theo bộ lọc hiện tại, kể cả kết thúc qua HTTP. Client không cần
+poll danh sách. Thông báo này được fan-out trong một tiến trình backend;
+nếu triển khai nhiều instance cần nối kênh thông báo liên tiến trình.
+
+Kết nối có ping/pong và giới hạn message 16 KiB. Khi mất kết nối, FE tự mở lại
+với backoff và gửi lại bộ lọc; không chuyển sang REST. FE dùng kênh này tại
+trang khám phá, danh sách chuyển phòng và danh sách live của người bán.
+API chi tiết phiên/sản phẩm, đơn hàng và media token vẫn giữ hợp đồng riêng.

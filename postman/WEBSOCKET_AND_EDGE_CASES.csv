@@ -14,6 +14,10 @@ WS-012,"Buyer, sau WS-011","`{""type"":""join_live"",""content"":""{{ended_live_
 WS-013,"Giữ tab seller cũ, mở tab seller mới cùng JWT","Connect tab mới, sau đó buyer gửi tin đến seller","Tab seller cũ bị đóng; tab seller mới nhận tin, không bị cleanup của tab cũ xóa mất"
 WS-014,"Buyer disconnect, seller còn online",Seller gửi tin đến `buyer_id`,Seller nhận ACK queued; chưa thể kết luận buyer đã đọc/nhận hoặc Mongo đã lưu chỉ từ ACK
 WS-015,Tab test riêng,Gửi payload JSON với content > 1 MiB,"Server đóng kết nối do giới hạn read, thường close code 1009; kết nối mới vẫn mở được"
+WS-016,Tab WebSocket công khai không JWT,Connect /api/livestreams/ws; gửi list_lives với query page=1/page_size=12,"list_lives_success, cùng request_id; data/total/page/page_size"
+WS-017,Đã đăng ký list_lives,Tạo/kết thúc live ở tab seller; thử HTTP end,Snapshot tự cập nhật; socket chat không bị thay
+WS-018,Cùng socket công khai,Đổi query status/q/seller_id/product_id/sort/page; thử UUID sai hoặc page_size=101,Subscription mới đúng bộ lọc; invalid_query cho bộ lọc sai
+WS-019,Tab công khai,Ngắt/mở lại và gửi subscription; thử create_live trên public socket,Nhận snapshot mới; lệnh tạo live bị từ chối
 EDGE-001,User mới chưa verified; gửi `/api/users/verify` với OTP chắc chắn khác mã hiện tại,Theo điều kiện chuẩn bị,"400, `Invalid verification code`"
 EDGE-002,User mới chưa verified; chờ OTP > 15 phút rồi verify đúng mã cũ,Theo điều kiện chuẩn bị,"400, `Verification code has expired`"
 EDGE-003,Xin OTP reset; gửi `/api/users/password/reset` với mã sai khi mã thật vẫn còn hạn,Theo điều kiện chuẩn bị,"400, `invalid_otp`; password không đổi"

@@ -517,6 +517,110 @@ func TestConnectedAPI(t *testing.T) {
 		}
 	})
 
+	t.Run("public websocket live lists validate filters and push lifecycle changes", func(t *testing.T) {
+		baseWS := "ws" + strings.TrimPrefix(server.URL, "http")
+		dial := func(path string) *websocket.Conn {
+			t.Helper()
+			conn, _, err := websocket.DefaultDialer.Dial(baseWS+path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { conn.Close() })
+			return conn
+		}
+		auth := dial("/api/auth/ws?token=" + tokens[seller.ID])
+		first, second := dial("/api/livestreams/ws"), dial("/api/livestreams/ws")
+		send := func(conn *websocket.Conn, message gin.H) {
+			t.Helper()
+			if err := conn.WriteJSON(message); err != nil {
+				t.Fatal(err)
+			}
+		}
+		read := func(conn *websocket.Conn, accept func(map[string]interface{}) bool) map[string]interface{} {
+			t.Helper()
+			conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+			for {
+				var reply map[string]interface{}
+				if err := conn.ReadJSON(&reply); err != nil {
+					t.Fatal(err)
+				}
+				if accept(reply) {
+					return reply
+				}
+			}
+		}
+		page := func(conn *websocket.Conn, requestID string, total int) map[string]interface{} {
+			t.Helper()
+			return read(conn, func(r map[string]interface{}) bool {
+				return r["type"] == "list_lives_success" && r["request_id"] == requestID && r["total"] == float64(total)
+			})
+		}
+		command := func(kind, content string) map[string]interface{} {
+			t.Helper()
+			send(auth, gin.H{"type": kind, "content": content})
+			return read(auth, func(r map[string]interface{}) bool { return r["type"] == kind+"_success" })
+		}
+		prefix := "WS list " + uuid.NewString()
+		send(first, gin.H{"type": "list_lives", "request_id": "all", "query": gin.H{"q": prefix, "seller_id": seller.ID, "status": "all", "sort": "oldest", "page_size": 1}})
+		send(second, gin.H{"type": "list_lives", "request_id": "open", "query": gin.H{"q": prefix}})
+		page(first, "all", 0)
+		page(second, "open", 0)
+		idA := command("create_live", prefix+"_A")["id"].(string)
+		created := page(first, "all", 1)
+		page(second, "open", 1)
+		entry := created["data"].([]interface{})[0].(map[string]interface{})
+		if entry["id"] != idA || entry["seller_username"] != seller.Username || created["page_size"] != float64(1) {
+			t.Fatalf("wrong live snapshot: %v", created)
+		}
+		for _, secret := range []string{"email", "password_hash", "user", "stream_url"} {
+			if _, leaked := entry[secret]; leaked {
+				t.Fatalf("public list leaked %s", secret)
+			}
+		}
+		db.Model(&models.Livestream{}).Where("id = ?", idA).Update("started_at", time.Now().Add(-time.Hour))
+		idB := command("create_live", prefix+"XA")["id"].(string)
+		ordered := page(first, "all", 2)
+		if ordered["data"].([]interface{})[0].(map[string]interface{})["id"] != idA {
+			t.Fatalf("oldest sort not applied: %v", ordered)
+		}
+		page(second, "open", 2)
+		send(first, gin.H{"type": "list_lives", "request_id": "literal", "query": gin.H{"q": prefix + "_A"}})
+		page(first, "literal", 1)
+		for _, invalid := range []gin.H{{"page": 0}, {"page_size": 101}, {"page_size": "20"}, {"status": "bad"}, {"sort": "price"}, {"seller_id": "bad"}, {"product_id": "bad"}, {"q": strings.Repeat("a", 101)}} {
+			send(first, gin.H{"type": "list_lives", "request_id": "invalid", "query": invalid})
+			reply := read(first, func(r map[string]interface{}) bool { return r["request_id"] == "invalid" })
+			if reply["type"] != "list_lives_error" || reply["error"] != "invalid_query" {
+				t.Fatalf("accepted invalid filter %v: %v", invalid, reply)
+			}
+		}
+		// This public endpoint must never execute authenticated commands.
+		send(first, gin.H{"type": "create_live", "request_id": "readonly", "content": "Forbidden"})
+		denied := read(first, func(r map[string]interface{}) bool { return r["request_id"] == "readonly" })
+		if denied["type"] != "list_lives_error" {
+			t.Fatal("public socket accepted a write")
+		}
+		p := product(t, seller.ID, 10)
+		send(first, gin.H{"type": "list_lives", "request_id": "product", "query": gin.H{"seller_id": seller.ID, "product_id": p.ID}})
+		page(first, "product", 0)
+		call(t, seller.ID, "POST", "/api/livestreams/"+idA+"/products", gin.H{"product_id": p.ID, "discount_price": 80, "stock_quantity": 2}, 201)
+		page(first, "product", 1)
+		call(t, seller.ID, "DELETE", "/api/livestreams/"+idA+"/products/"+p.ID, nil, 204)
+		page(first, "product", 0)
+		command("end_live", idA)
+		page(second, "open", 1)
+		call(t, seller.ID, "POST", "/api/livestreams/"+idB+"/end", nil, 200)
+		page(second, "open", 0)
+		send(first, gin.H{"type": "list_lives", "request_id": "page2", "query": gin.H{"q": prefix, "status": "end", "sort": "oldest", "page": 2, "page_size": 1}})
+		ended := page(first, "page2", 2)
+		if ended["page"] != float64(2) || ended["data"].([]interface{})[0].(map[string]interface{})["id"] != idB {
+			t.Fatalf("wrong ended page: %v", ended)
+		}
+		first.Close()
+		reconnected := dial("/api/livestreams/ws")
+		send(reconnected, gin.H{"type": "list_lives", "request_id": "again", "query": gin.H{"q": prefix, "status": "end"}})
+		page(reconnected, "again", 2)
+	})
+
 	t.Run("create live and manage its products", func(t *testing.T) {
 		ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/api/auth/ws?token="+tokens[seller.ID], nil)
 		if err != nil {

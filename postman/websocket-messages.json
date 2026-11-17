@@ -130,6 +130,22 @@
         "type": "join_live",
         "content": "{{ended_live_id}}"
       }
+    },
+    {
+      "case": "WS-016",
+      "tab": "public live list",
+      "payload": {
+        "type": "list_lives",
+        "request_id": "catalog-1",
+        "query": {
+          "status": "start",
+          "sort": "newest",
+          "q": "",
+          "page": 1,
+          "page_size": 12
+        }
+      }
     }
-  ]
+  ],
+  "public_live_url": "{{ws_url}}/api/livestreams/ws"
 }
