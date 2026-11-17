@@ -28,6 +28,7 @@ func SetupUserRoutes(r *gin.Engine) {
 	shippingGroup.GET("/provinces", controllers.ShippingProvinces)
 	shippingGroup.GET("/districts", controllers.ShippingDistricts)
 	shippingGroup.GET("/wards", controllers.ShippingWards)
+	shippingGroup.POST("/stations/nearby", controllers.NearbyShippingStations)
 	orderGroup.GET("", controllers.ListOrders)
 	orderGroup.POST("/quote", controllers.QuoteOrder)
 	orderGroup.GET("/:order_id", controllers.GetOrder)

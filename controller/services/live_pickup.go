@@ -36,7 +36,7 @@ func GetLivePickup(ctx context.Context, userID, liveID string) (*models.Delivery
 }
 
 func SaveLivePickup(ctx context.Context, userID, liveID string, input models.DeliveryAddress) (*models.DeliveryAddress, error) {
-	address, err := normalizeDelivery(input)
+	address, err := normalizePickup(ctx, input)
 	if err != nil {
 		return nil, err
 	}

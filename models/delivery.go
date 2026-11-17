@@ -4,6 +4,8 @@ import "time"
 
 // DeliveryAddress is copied into orders, not joined to mutable profile data.
 type DeliveryAddress struct {
+	StationID         int      `json:"station_id,omitempty"`
+	StationName       string   `json:"station_name,omitempty" gorm:"size:255"`
 	CarrierProvinceID int      `json:"carrier_province_id,omitempty"`
 	CarrierDistrictID int      `json:"carrier_district_id,omitempty"`
 	CarrierWardCode   string   `json:"carrier_ward_code,omitempty" gorm:"size:32"`
@@ -25,6 +27,9 @@ type ProductParcel struct {
 	HeightCM    int `json:"height_cm"`
 }
 type ShippingQuoteSnapshot struct {
+	OriginType    string        `json:"origin_type,omitempty" gorm:"size:24"`
+	StationID     int           `json:"station_id,omitempty"`
+	StationName   string        `json:"station_name,omitempty" gorm:"size:255"`
 	Provider      string        `json:"provider" gorm:"size:16"`
 	Environment   string        `json:"environment" gorm:"size:16"`
 	QuoteOnly     bool          `json:"quote_only"`

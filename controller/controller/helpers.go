@@ -23,11 +23,13 @@ func writeServiceError(c *gin.Context, err error) {
 	status := http.StatusInternalServerError
 	message := err.Error()
 	switch message {
-	case "shipping_invalid_parcel", "shipping_address_required", "shipping_address_unavailable":
+	case "shipping_invalid_parcel", "shipping_address_required", "shipping_address_unavailable", "shipping_station_invalid":
 		status = http.StatusBadRequest
 	case "shipping_product_incomplete", "shipping_pickup_required", "shipping_pickup_area_required":
 		status = http.StatusConflict
 	case "shipping_provider_not_configured":
+		status = http.StatusServiceUnavailable
+	case "shipping_stations_access_required":
 		status = http.StatusServiceUnavailable
 	case "shipping_unavailable":
 		status = http.StatusBadGateway

@@ -400,3 +400,12 @@ các địa chỉ đã có; không cần tự xóa/tạo lại bảng.
 Cơ chế phí cố định do shop nhập đã được thay bằng ShippingService (GHN).
 Xem [SHIPPING.md](SHIPPING.md). GET /api/livestreams/:id/pickup không còn trả
 shipping_rates; PUT chỉ cần pickup_address. Shop không cần nhập phí để phát.
+
+### Tra bưu cục GHN quanh điểm phát
+
+`POST /api/shipping/stations/nearby` cần JWT, nhận latitude/longitude và
+carrier_province_id/carrier_district_id. Kết quả xếp theo khoảng cách đường
+chim bay trong khu vực tra cứu; chọn bưu cục rồi PUT pickup_address với
+station_id để backend xác minh địa chỉ. Phí quote dùng tuyến từ bưu cục,
+không tự tạo đơn giao hàng. Quyền GHN/captcha và giới hạn tra cứu xem
+[SHIPPING.md](SHIPPING.md#bưu-cục-gần-vị-trí-phát).

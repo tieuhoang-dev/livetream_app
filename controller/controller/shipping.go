@@ -79,3 +79,22 @@ func ShippingWards(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"data": result})
 }
+
+func NearbyShippingStations(c *gin.Context) {
+	var input struct {
+		Latitude   *float64 `json:"latitude"`
+		Longitude  *float64 `json:"longitude"`
+		ProvinceID int      `json:"carrier_province_id"`
+		DistrictID int      `json:"carrier_district_id"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil || input.Latitude == nil || input.Longitude == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_coordinates"})
+		return
+	}
+	result, err := services.NearbyShippingStations(c.Request.Context(), *input.Latitude, *input.Longitude, input.ProvinceID, input.DistrictID)
+	if err != nil {
+		writeServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}

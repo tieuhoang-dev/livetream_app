@@ -21,6 +21,7 @@ const (
 	provincePath = "/shiip/public-api/master-data/province"
 	districtPath = "/shiip/public-api/master-data/district"
 	wardPath     = "/shiip/public-api/master-data/ward"
+	stationPath  = "/shiip/public-api/v2/station/get"
 	feePath      = "/shiip/public-api/v2/shipping-order/fee"
 )
 
@@ -37,6 +38,20 @@ type Ward struct {
 	Code        string `json:"WardCode"`
 	Name        string `json:"WardName"`
 	SupportType int    `json:"SupportType"`
+}
+type Station struct {
+	ID           int      `json:"locationId"`
+	Name         string   `json:"locationName"`
+	Address      string   `json:"address"`
+	WardName     string   `json:"wardName"`
+	DistrictName string   `json:"districtName"`
+	ProvinceName string   `json:"provinceName"`
+	Latitude     *float64 `json:"latitude"`
+	Longitude    *float64 `json:"longitude"`
+}
+type StationList struct {
+	Data     []Station
+	Complete bool
 }
 type Route struct {
 	DistrictID int    `json:"district_id"`
@@ -66,6 +81,7 @@ type Provider interface {
 	Provinces(context.Context) ([]Province, error)
 	Districts(context.Context, int) ([]District, error)
 	Wards(context.Context, int) ([]Ward, error)
+	Stations(context.Context, int) (StationList, error)
 	Quote(context.Context, QuoteRequest) (Fee, error)
 }
 type Config struct {
@@ -133,7 +149,7 @@ type quoteOnlyTransport struct {
 
 func (t quoteOnlyTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	u, _ := url.Parse(t.base)
-	allowed := (r.Method == http.MethodGet && (r.URL.Path == provincePath || r.URL.Path == districtPath || r.URL.Path == wardPath)) || (r.Method == http.MethodPost && r.URL.Path == feePath)
+	allowed := (r.Method == http.MethodGet && (r.URL.Path == provincePath || r.URL.Path == districtPath || r.URL.Path == wardPath || r.URL.Path == stationPath)) || (r.Method == http.MethodPost && r.URL.Path == feePath)
 	if !allowed || r.URL.Host != u.Host || r.URL.Scheme != u.Scheme || r.URL.User != nil {
 		return nil, errors.New("shipping_operation_not_allowed")
 	}
@@ -164,6 +180,9 @@ func (c *Client) read(ctx context.Context, method, path string, query url.Values
 		return errors.New("shipping_unavailable")
 	}
 	defer response.Body.Close()
+	if path == stationPath && response.StatusCode == 422 {
+		return errors.New("shipping_stations_access_required")
+	}
 	if response.StatusCode == 401 || response.StatusCode == 403 {
 		return errors.New("shipping_provider_not_configured")
 	}
@@ -228,6 +247,36 @@ func (c *Client) Wards(ctx context.Context, district int) ([]Ward, error) {
 	var rows []Ward
 	err := c.catalog(ctx, wardPath, url.Values{"district_id": {strconv.Itoa(district)}}, &rows)
 	return rows, err
+}
+func (c *Client) Stations(ctx context.Context, district int) (StationList, error) {
+	if district <= 0 {
+		return StationList{}, errors.New("shipping_address_required")
+	}
+	result := StationList{Data: make([]Station, 0)}
+	seen := make(map[int]bool)
+	// Bound pagination even if the upstream ignores offset. No automatic retry.
+	for page := 0; page < 5; page++ {
+		var rows []Station
+		if err := c.catalog(ctx, stationPath, url.Values{"district_id": {strconv.Itoa(district)}, "offset": {strconv.Itoa(page * 100)}, "limit": {"100"}}, &rows); err != nil {
+			return StationList{}, err
+		}
+		added := 0
+		for _, row := range rows {
+			if row.ID > 0 && !seen[row.ID] {
+				seen[row.ID] = true
+				result.Data = append(result.Data, row)
+				added++
+			}
+		}
+		if len(rows) < 100 {
+			result.Complete = true
+			break
+		}
+		if added == 0 {
+			break
+		}
+	}
+	return result, nil
 }
 func (c *Client) Quote(ctx context.Context, input QuoteRequest) (Fee, error) {
 	p := input.Parcel

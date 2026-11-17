@@ -1098,6 +1098,52 @@ func TestConnectedAPI(t *testing.T) {
 		call(t, seller.ID, "GET", "/api/sales/orders/"+placed["order_id"].(string), nil, 200)
 	})
 
+	t.Run("station drop-off quotes canonical origin without creating a shipment", func(t *testing.T) {
+		lookup := gin.H{"latitude": 21.028511, "longitude": 105.804817, "carrier_province_id": 1, "carrier_district_id": 100}
+		call(t, "", "POST", "/api/shipping/stations/nearby", lookup, 401)
+		call(t, seller.ID, "POST", "/api/shipping/stations/nearby", gin.H{"latitude": 91, "longitude": 105}, 400)
+		nearby := call(t, seller.ID, "POST", "/api/shipping/stations/nearby", lookup, 200)
+		if nearby["quote_only"] != true || len(nearby["data"].([]interface{})) != 1 {
+			t.Fatal("missing station results", nearby)
+		}
+		live := models.Livestream{ID: uuid.NewString(), SellerID: seller.ID, Title: "Station origin", Status: "start", StartedAt: time.Now()}
+		if err := db.Create(&live).Error; err != nil {
+			t.Fatal(err)
+		}
+		path := "/api/livestreams/" + live.ID
+		p := product(t, seller.ID, 10)
+		call(t, seller.ID, "POST", path+"/products", gin.H{"product_id": p.ID, "discount_price": 80, "stock_quantity": 3}, 201)
+		pickup := gin.H{"station_id": 1888, "station_name": "Forged", "name": "Shop contact", "phone": "0901234567", "carrier_province_id": 1, "carrier_district_id": 100, "address_line": "Forged address"}
+		saved := call(t, seller.ID, "PUT", path+"/pickup", gin.H{"pickup_address": pickup}, 200)
+		canonical := saved["pickup_address"].(map[string]interface{})
+		if canonical["address_line"] != "10 Đường bưu cục" || canonical["station_name"] != "Bưu cục thử nghiệm" || canonical["carrier_ward_code"] != "ward-100" {
+			t.Fatal("station data trusted the browser", canonical)
+		}
+		call(t, buyer.ID, "PUT", path+"/pickup", gin.H{"pickup_address": pickup}, 403)
+		pickup["station_id"] = 9999
+		call(t, seller.ID, "PUT", path+"/pickup", gin.H{"pickup_address": pickup}, 400)
+		input := gin.H{"product_id": p.ID, "quantity": 1, "livestream_id": live.ID, "payment_method": "cod", "delivery": deliveryFixture, "request_id": uuid.NewString()}
+		quote := call(t, buyer.ID, "POST", "/api/orders/quote", input, 200)
+		meta := quote["shipping"].(map[string]interface{})
+		if meta["origin_type"] != "station_dropoff" || meta["station_id"] != float64(1888) || carrier.lastQuote.Load().From.WardCode != "ward-100" {
+			t.Fatal("quote did not use the canonical station route", quote)
+		}
+		input["expected_total"] = quote["total_amount"]
+		placed := call(t, buyer.ID, "POST", "/api/orders", input, 201)
+		detail := call(t, buyer.ID, "GET", "/api/orders/"+placed["order_id"].(string), nil, 200)
+		if detail["delivery"].(map[string]interface{})["pickup"].(map[string]interface{})["station_id"] != float64(1888) {
+			t.Fatal("station snapshot missing")
+		}
+		carrier.stationFailure = errors.New("shipping_stations_access_required")
+		defer func() { carrier.stationFailure = nil }()
+		again := call(t, buyer.ID, "POST", "/api/orders", input, 201)
+		if again["order_id"] != placed["order_id"] {
+			t.Fatal("retry failed while carrier station API was unavailable")
+		}
+		input["request_id"] = uuid.NewString()
+		call(t, buyer.ID, "POST", "/api/orders", input, 503)
+	})
+
 	t.Run("live pickup uses broadcast origin and keeps order snapshots private", func(t *testing.T) {
 		carrier.same, carrier.other = 25000, 40000
 		defer func() { carrier.same, carrier.other = 0, 0 }()

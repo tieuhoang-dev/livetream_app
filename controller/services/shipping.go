@@ -137,7 +137,14 @@ func prepareCheckout(ctx context.Context, db *gorm.DB, userID string, input Orde
 	if err != nil {
 		return result, err
 	}
-	from, err := carrierRoute(ctx, provider, pickup, true)
+	canonicalPickup := pickup
+	if pickup.StationID > 0 {
+		canonicalPickup, err = resolveStationPickup(ctx, provider, pickup)
+		if err != nil {
+			return result, err
+		}
+	}
+	from, err := carrierRoute(ctx, provider, canonicalPickup, true)
 	if err != nil {
 		if err.Error() == "shipping_address_required" || err.Error() == "shipping_address_unavailable" {
 			return result, errors.New("shipping_pickup_area_required")
@@ -160,7 +167,11 @@ func prepareCheckout(ctx context.Context, db *gorm.DB, userID string, input Orde
 		return result, errors.New("shipping_unavailable")
 	}
 	snapshot := &models.ShippingQuoteSnapshot{Provider: "ghn", Environment: provider.Environment(), QuoteOnly: true, ServiceTypeID: fee.ServiceTypeID, TotalFee: fee.Total, ServiceFee: fee.ServiceFee, InsuranceFee: fee.InsuranceFee, Parcel: parcel, QuotedAt: time.Now().UTC()}
-	canonicalPickup, recipient := pickup, input.Delivery
+	recipient := input.Delivery
+	snapshot.OriginType = "seller_address"
+	if canonicalPickup.StationID > 0 {
+		snapshot.OriginType, snapshot.StationID, snapshot.StationName = "station_dropoff", canonicalPickup.StationID, canonicalPickup.StationName
+	}
 	canonicalPickup.Ward, recipient.Ward = from.WardName, to.WardName
 	result = preparedCheckout{Info: info, Pickup: canonicalPickup, Recipient: recipient, Version: checkoutVersion(info, pickup), Quote: CheckoutQuote{
 		UnitPrice: float64(unit) / 100, Quantity: input.Quantity, ItemsSubtotal: float64(subtotal) / 100, ShippingFee: float64(fee.Total), TotalAmount: float64(subtotal)/100 + float64(fee.Total), Currency: "VND", ShippingZone: "carrier", PickupProvince: pickup.ProvinceName, Shipping: snapshot,

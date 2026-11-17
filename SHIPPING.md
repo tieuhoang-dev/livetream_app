@@ -25,6 +25,7 @@ Client chỉ cho phép chính xác:
 - GET `/shiip/public-api/master-data/province`
 - GET `/shiip/public-api/master-data/district`
 - GET `/shiip/public-api/master-data/ward`
+- GET `/shiip/public-api/v2/station/get`
 - POST `/shiip/public-api/v2/shipping-order/fee`
 
 Lớp HTTP từ chối đường dẫn/phương thức khác, host khác và mọi redirect trước
@@ -83,3 +84,53 @@ pickup vẫn lưu địa chỉ, các trường phí shop cũ không còn đượ
 
 Tài liệu chính thức đã đối chiếu: https://developer.ghn.vn/en/docs/order/calculate-fee
 và https://developer.ghn.vn/en/docs/getting-started/overview.
+
+## Bưu cục gần vị trí phát
+
+Người bán có thể mở **Cài đặt giao hàng** trong live (hoặc bước **Bắt đầu
+phát**), lấy GPS, rồi bấm **Tìm bưu cục GHN gần vị trí này**. Danh sách có
+khoảng cách đường chim bay, ghim trên bản đồ và liên kết chỉ đường. Không tự
+chọn bưu cục đầu tiên; người bán xác nhận bưu cục mình sẽ tự mang hàng đến.
+
+GHN Get Station bắt buộc quận/huyện. Reverse geocode tự điền mã khu vực nếu
+tên tỉnh/quận/phường khớp duy nhất với danh mục GHN. Thiếu tên quận hoặc dữ
+liệu sau sáp nhập chưa khớp thì chọn khu vực thủ công. Tra cứu giới hạn theo
+quận/huyện đã chọn, không bảo đảm là bưu cục gần nhất ngoài khu vực đó. Có thể
+đổi sang quận lân cận để tìm tiếp. Khoảng cách không phải quãng đường chạy xe
+và không được dùng làm công thức tính phí ship.
+
+API ứng dụng (cần JWT):
+
+```http
+POST /api/shipping/stations/nearby
+Content-Type: application/json
+
+{"latitude":21.028511,"longitude":105.804817,"carrier_province_id":<GHN province ID>,"carrier_district_id":<GHN district ID>}
+```
+
+Response: `data[]` gồm id/name/address, tọa độ/khoảng cách nếu có,
+`pickup_address` nếu ánh xạ được tuyến; kèm district, environment, complete,
+quote_only=true. `complete=false` khi chưa đọc hết danh mục (tối đa 5 trang
+100 dòng, dừng nếu hãng lặp trang). Không nhận token GHN từ FE. Tọa độ GPS
+chỉ để backend xếp hạng; GHN nhận mã quận, không nhận GPS cá nhân từ API này.
+
+Chọn bưu cục điền địa chỉ, giữ tên/điện thoại người bán. Khi lưu pickup,
+backend đọc lại bưu cục theo `station_id` và khu vực, lấy địa chỉ chuẩn từ
+GHN; không tin tên/đường/phường do client tự gửi. Bưu cục không ánh xạ chắc
+chắn được phường theo danh mục GHN vẫn xem được nhưng không được chọn để
+báo phí. Snapshot đơn có station_id/station_name và
+`delivery.shipping.origin_type=station_dropoff`. Thay đổi nơi lấy hàng không
+đổi snapshot đơn cũ; lưu nơi gửi và đặt mua không rời phòng live.
+
+Fee API được gọi với from_district_id/from_ward_code của bưu cục. Đây là báo
+phí theo tuyến từ khu vực bưu cục, chưa phải chốt phí gửi thực tế hay xác nhận
+bất kỳ ưu đãi/phụ phí nào của hình thức gửi tại quầy. Không gửi pick_station_id
+sang API tạo đơn, không tạo vận đơn, không đặt lịch lấy hàng.
+
+Một số tài khoản GHN yêu cầu quyền tra bưu cục/captcha. HTTP 422 trả lỗi
+`shipping_stations_access_required`; liên hệ GHN mở quyền. Giao diện cho nhập
+địa chỉ lấy hàng để tiếp tục, không giả dữ liệu bưu cục hay tự vượt captcha.
+Lỗi tra bưu cục không làm mất địa chỉ đang nhập. Bài kiểm thử dùng bưu cục và
+HTTP fixture giả lập, chưa xác nhận dữ liệu bưu cục của tài khoản GHN thật.
+
+Tài liệu GHN: https://developer.ghn.vn/vi/docs/master-data/get-station.

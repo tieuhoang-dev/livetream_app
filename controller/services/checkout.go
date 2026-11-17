@@ -124,6 +124,8 @@ func normalizeCheckoutInput(input OrderInput, completeDelivery bool) (OrderInput
 		}
 	}
 	input.PaymentMethod = strings.TrimSpace(input.PaymentMethod)
+	// Stations are seller drop-off origins, never buyer destinations.
+	input.Delivery.StationID, input.Delivery.StationName = 0, ""
 	if !completeDelivery && input.PaymentMethod == "" {
 		input.PaymentMethod = "cod"
 	}
@@ -275,7 +277,7 @@ func GetShippingSettings(ctx context.Context, sellerID string) (*models.Shipping
 	return &row, err
 }
 func SaveShippingSettings(ctx context.Context, sellerID string, row models.ShippingSettings) (*models.ShippingSettings, error) {
-	address, err := normalizeDelivery(row.Pickup)
+	address, err := normalizePickup(ctx, row.Pickup)
 	if err != nil {
 		return nil, err
 	}
