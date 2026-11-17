@@ -107,6 +107,7 @@ func TestConnectedAPI(t *testing.T) {
 	}
 
 	t.Cleanup(func() {
+		db.Exec("DELETE FROM livestream_pickups WHERE livestream_id IN (SELECT id FROM livestreams WHERE seller_id IN ?)", ids)
 		db.Exec("DELETE FROM order_deliveries WHERE order_id IN (SELECT id FROM orders WHERE user_id IN ?)", ids)
 		db.Where("seller_id IN ?", ids).Delete(&models.ShippingSettings{})
 		db.Exec("DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE user_id IN ?)", ids)
@@ -1060,6 +1061,67 @@ func TestConnectedAPI(t *testing.T) {
 		}
 		call(t, other.ID, "GET", "/api/orders/"+placed["order_id"].(string), nil, 404)
 		call(t, seller.ID, "GET", "/api/sales/orders/"+placed["order_id"].(string), nil, 200)
+	})
+
+	t.Run("live pickup uses broadcast origin and keeps order snapshots private", func(t *testing.T) {
+		call(t, "", "POST", "/api/delivery/reverse-geocode", gin.H{"latitude": 21, "longitude": 105}, 401)
+		call(t, buyer.ID, "POST", "/api/delivery/reverse-geocode", gin.H{"latitude": 91, "longitude": 105}, 400)
+		call(t, buyer.ID, "POST", "/api/delivery/reverse-geocode", gin.H{"latitude": 21}, 400)
+		live := models.Livestream{ID: uuid.NewString(), SellerID: seller.ID, Title: "Live pickup location", Status: "start", StartedAt: time.Now()}
+		if err := db.Create(&live).Error; err != nil {
+			t.Fatal(err)
+		}
+		path := "/api/livestreams/" + live.ID
+		call(t, "", "GET", path+"/pickup", nil, 401)
+		call(t, buyer.ID, "GET", path+"/pickup", nil, 403)
+		fallback := call(t, seller.ID, "GET", path+"/pickup", nil, 200)
+		if fallback["pickup_address"].(map[string]interface{})["province_code"] != "1" {
+			t.Fatalf("missing shop fallback: %v", fallback)
+		}
+		pickup := gin.H{"name": "Live seller", "phone": "0901234567", "province_code": "79", "ward": "Phường Sài Gòn", "address_line": "12 Nguyễn Huệ", "latitude": 10.773, "longitude": 106.704, "location_mode": "current"}
+		call(t, buyer.ID, "PUT", path+"/pickup", gin.H{"pickup_address": pickup}, 403)
+		call(t, seller.ID, "PUT", path+"/pickup", gin.H{"pickup_address": pickup}, 200)
+		public := call(t, "", "GET", path, nil, 200)
+		if public["pickup_address"] != nil || public["latitude"] != nil {
+			t.Fatal("public live leaked pickup location")
+		}
+		db.Model(&models.ShippingSettings{}).Where("seller_id = ?", seller.ID).Updates(map[string]interface{}{"same_province_fee": 25000, "other_province_fee": 40000})
+		defer db.Model(&models.ShippingSettings{}).Where("seller_id = ?", seller.ID).Updates(map[string]interface{}{"same_province_fee": 0, "other_province_fee": 0})
+		p := product(t, seller.ID, 10)
+		call(t, seller.ID, "POST", path+"/products", gin.H{"product_id": p.ID, "discount_price": 80, "stock_quantity": 2}, 201)
+		destination := gin.H{"name": "Receiver", "phone": "0901234567", "province_code": "79", "ward": "Phường Sài Gòn", "address_line": "34 Nguyễn Huệ", "latitude": 10.774, "longitude": 106.705, "location_mode": "current"}
+		input := gin.H{"product_id": p.ID, "quantity": 1, "livestream_id": live.ID, "payment_method": "cod", "delivery": destination, "request_id": uuid.NewString()}
+		quote := call(t, buyer.ID, "POST", "/api/orders/quote", input, 200)
+		if quote["shipping_fee"] != float64(25000) || quote["pickup_province"] != "Thành phố Hồ Chí Minh" {
+			t.Fatalf("used shop instead of live origin: %v", quote)
+		}
+		input["expected_total"] = quote["total_amount"]
+		created := call(t, buyer.ID, "POST", "/api/orders", input, 201)
+		detailPath := "/api/orders/" + created["order_id"].(string)
+		detail := call(t, buyer.ID, "GET", detailPath, nil, 200)
+		address := detail["delivery"].(map[string]interface{})["pickup"].(map[string]interface{})
+		if address["province_code"] != "79" || address["latitude"] != 10.773 || address["location_mode"] != "current" {
+			t.Fatalf("wrong pickup snapshot: %v", address)
+		}
+		pickup["province_code"], pickup["location_mode"] = "1", "manual"
+		pickup["latitude"], pickup["longitude"] = nil, nil
+		call(t, seller.ID, "PUT", path+"/pickup", gin.H{"pickup_address": pickup}, 200)
+		quote = call(t, buyer.ID, "POST", "/api/orders/quote", input, 200)
+		if quote["shipping_fee"] != float64(40000) {
+			t.Fatalf("live pickup edit ignored: %v", quote)
+		}
+		detail = call(t, buyer.ID, "GET", detailPath, nil, 200)
+		if detail["delivery"].(map[string]interface{})["pickup"].(map[string]interface{})["province_code"] != "79" {
+			t.Fatal("live pickup edit mutated an existing order")
+		}
+		settings := call(t, seller.ID, "GET", "/api/sales/shipping-settings", nil, 200)
+		if settings["settings"].(map[string]interface{})["pickup_address"].(map[string]interface{})["province_code"] != "1" {
+			t.Fatal("live pickup changed shop address")
+		}
+		destination["latitude"] = nil
+		call(t, buyer.ID, "POST", "/api/orders/quote", input, 400)
+		call(t, seller.ID, "POST", path+"/end", nil, 200)
+		call(t, seller.ID, "PUT", path+"/pickup", gin.H{"pickup_address": pickup}, 409)
 	})
 
 	t.Run("concurrent retries create one delivery order", func(t *testing.T) {

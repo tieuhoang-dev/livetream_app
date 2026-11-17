@@ -31,7 +31,9 @@ func writeServiceError(c *gin.Context, err error) {
 		status = http.StatusBadRequest
 	case "insufficient_stock", "product_already_in_livestream", "product_has_active_orders", "livestream_not_active", "order_not_paid", "order_not_pending", "order_already_paid", "order_already_processed", "product_in_use", "shipping_not_configured", "checkout_changed", "duplicate_request_conflict":
 		status = http.StatusConflict
-	case "live_media_unavailable", "chat_storage_unavailable":
+	case "invalid_coordinates", "location_not_supported":
+		status = http.StatusBadRequest
+	case "live_media_unavailable", "chat_storage_unavailable", "geocoding_unavailable":
 		status = http.StatusServiceUnavailable
 	case "email_delivery_failed":
 		status = http.StatusBadGateway

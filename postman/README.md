@@ -215,3 +215,10 @@ Checkout mới yêu cầu địa chỉ nhận và cấu hình giao hàng của s
 **01b - Giao hàng (tài khoản test)** sau đăng nhập/xác thực và trước HTTP tự động.
 SHIP-001 thiết lập địa chỉ shop và phí 0 cho fixture; không dùng tài khoản shop thật.
 Xem API.md mục Checkout để thử phí nội tỉnh/liên tỉnh khác 0.
+
+Có thể thử tự điền địa chỉ bằng `POST {{base_url}}/api/delivery/reverse-geocode`
+với JWT và body `{"latitude":21.028511,"longitude":105.804817}`. Request này cần
+Internet/provider đang hoạt động; chưa nằm trong HTTP regression tự động.
+Trên trình duyệt, chọn Nhập địa chỉ hoặc Sử dụng vị trí hiện tại. Người bán
+xác nhận địa chỉ phiên ở bước Bắt đầu phát; GET/PUT `/api/livestreams/:id/pickup`
+chỉ dành cho chủ phiên. Địa chỉ `location_mode=current` phải có đủ tọa độ.

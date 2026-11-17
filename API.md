@@ -394,3 +394,50 @@ Kết nối có ping/pong và giới hạn message 16 KiB. Khi mất kết nối
 với backoff và gửi lại bộ lọc; không chuyển sang REST. FE dùng kênh này tại
 trang khám phá, danh sách chuyển phòng và danh sách live của người bán.
 API chi tiết phiên/sản phẩm, đơn hàng và media token vẫn giữ hợp đồng riêng.
+
+## Vị trí hiện tại và nơi lấy hàng của phiên live
+
+`DeliveryAddress` có thêm `location_mode: "manual" | "current"` (tùy chọn cho
+client cũ). Chế độ `current` bắt buộc cả latitude và longitude, cùng địa chỉ
+đủ tên/điện thoại/tỉnh/phường/đường. Tọa độ GPS không thay tên/số điện thoại
+hoặc số căn hộ; người dùng kiểm tra và bổ sung nếu dữ liệu bản đồ chưa đủ.
+
+`POST /api/delivery/reverse-geocode` cần JWT, body:
+
+```json
+{"latitude":21.028511,"longitude":105.804817}
+```
+
+Response 200 có `address` gồm location_mode=current, province_code/name, ward,
+address_line, latitude/longitude và `attribution`. Tên/điện thoại được giữ trên
+FE, không gửi đến dịch vụ bản đồ. Tỉnh cũ từ provider được ánh xạ về danh mục
+34 tỉnh hiện tại. Ngoài Việt Nam/không xác định tỉnh trả 400
+`location_not_supported`; tọa độ thiếu/sai trả 400 `invalid_coordinates`;
+lỗi dịch vụ trả 503 `geocoding_unavailable`. Không tự dùng địa chỉ cũ khi GPS
+thất bại: FE yêu cầu thử lại hoặc chủ động chọn Nhập địa chỉ.
+
+Backend mặc định gọi Nominatim/OpenStreetMap, tối đa một request/giây trong
+một tiến trình, cache tối đa 256 vị trí trong 10 phút. Có thể cấu hình
+`GEOCODING_REVERSE_URL` trỏ đến dịch vụ reverse tương thích Nominatim; cần
+khởi động lại backend sau khi đổi. Nếu chạy nhiều instance hoặc lưu lượng
+cao, dùng dịch vụ riêng/thích hợp thay vì public endpoint. FE giữ attribution
+OpenStreetMap. Reverse geocoding và tile maps đều cần Internet.
+
+Hai API sau cần JWT **chủ phiên**, không xuất địa chỉ qua danh sách/chi tiết
+live công khai:
+
+- `GET /api/livestreams/:id/pickup`: `{pickup_address: ...}`; nếu chưa có nơi
+  riêng thì dùng địa chỉ shop để điền sẵn, hoặc null khi shop chưa cấu hình.
+- `PUT /api/livestreams/:id/pickup`: body `{pickup_address: DeliveryAddress}`.
+  Lưu địa chỉ cho phiên đang mở; người khác nhận 403, phiên kết thúc nhận 409.
+
+Khi bắt đầu phát, FE mặc định lấy GPS mới, tự điền địa chỉ và xin người bán
+kiểm tra/xác nhận. Sau khi lưu nơi lấy hàng mới, FE mới xin media token.
+Có thể chuyển sang Nhập địa chỉ nếu không dùng GPS. Đây là vị trí tại thời
+điểm bắt đầu phát, không phải theo dõi vị trí liên tục.
+
+Checkout trong live dùng nơi lấy hàng của **phiên đó** và mức phí của shop;
+đơn ngoài live vẫn dùng địa chỉ shop. Phiên cũ chưa có địa chỉ riêng dùng
+địa chỉ shop như trước. Cập nhật nơi phát không đổi địa chỉ shop hoặc snapshot
+đã lưu trong đơn cũ. Migration thêm `livestream_pickups` và location_mode vào
+các địa chỉ đã có; không cần tự xóa/tạo lại bảng.

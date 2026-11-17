@@ -22,6 +22,7 @@ func MigrateAll(db *gorm.DB) {
 		&Livestream{},
 		&ShippingSettings{},
 		&OrderDelivery{},
+		&LivestreamPickup{},
 	)
 
 	if err != nil {

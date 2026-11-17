@@ -58,6 +58,12 @@ type CheckoutQuote struct {
 }
 
 func normalizeDelivery(input models.DeliveryAddress) (models.DeliveryAddress, error) {
+	if input.LocationMode != "" && input.LocationMode != "manual" && input.LocationMode != "current" {
+		return input, errors.New("invalid_delivery_address")
+	}
+	if input.LocationMode == "current" && (input.Latitude == nil || input.Longitude == nil) {
+		return input, errors.New("invalid_delivery_address")
+	}
 	input.Name = strings.TrimSpace(input.Name)
 	input.Phone = strings.TrimSpace(input.Phone)
 	input.Phone = strings.NewReplacer(" ", "", "-", "", ".", "").Replace(input.Phone)
@@ -189,6 +195,26 @@ func shippingPolicy(db *gorm.DB, sellerID string, lock bool) (models.ShippingSet
 	}
 	return settings, nil
 }
+func checkoutShippingPolicy(db *gorm.DB, input OrderInput, sellerID string, lock bool) (models.ShippingSettings, error) {
+	settings, err := shippingPolicy(db, sellerID, lock)
+	if err != nil || input.LivestreamID == nil {
+		return settings, err
+	}
+	query := db
+	if lock {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	var pickup models.LivestreamPickup
+	err = query.Take(&pickup, "livestream_id = ?", *input.LivestreamID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return settings, nil // Older lives retain their saved shop origin.
+	}
+	if err != nil {
+		return settings, err
+	}
+	settings.Pickup = pickup.Address
+	return settings, nil
+}
 func priceCheckout(info purchaseInfo, input OrderInput, settings models.ShippingSettings) (CheckoutQuote, error) {
 	unit, err := moneyCents(info.Price)
 	if err != nil {
@@ -230,7 +256,7 @@ func QuoteOrder(ctx context.Context, userID string, input OrderInput) (CheckoutQ
 	if err != nil {
 		return CheckoutQuote{}, err
 	}
-	settings, err := shippingPolicy(db, info.SellerID, false)
+	settings, err := checkoutShippingPolicy(db, input, info.SellerID, false)
 	if err != nil {
 		return CheckoutQuote{}, err
 	}

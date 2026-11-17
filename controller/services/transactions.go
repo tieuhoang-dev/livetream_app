@@ -42,7 +42,7 @@ func OrderProduct(ctx context.Context, userID string, raw OrderInput) (*models.O
 			}
 			return err
 		}
-		settings, err := shippingPolicy(tx, info.SellerID, true)
+		settings, err := checkoutShippingPolicy(tx, input, info.SellerID, true)
 		if err != nil {
 			return err
 		}
