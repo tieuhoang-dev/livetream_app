@@ -30,6 +30,10 @@ func OrderProduct(ctx context.Context, userID string, raw OrderInput) (*models.O
 	if existing, err := replayOrder(db, userID, input.RequestID, hash); existing != nil || err != nil {
 		return existing, err
 	}
+	prepared, err := prepareCheckout(ctx, db, userID, input)
+	if err != nil {
+		return nil, err
+	}
 	var order models.Order
 	err = db.Transaction(func(tx *gorm.DB) error {
 		info, err := checkoutProduct(tx, userID, input, true)
@@ -42,14 +46,14 @@ func OrderProduct(ctx context.Context, userID string, raw OrderInput) (*models.O
 			}
 			return err
 		}
-		settings, err := checkoutShippingPolicy(tx, input, info.SellerID, true)
+		pickup, err := checkoutPickup(tx, input, info.SellerID, true)
 		if err != nil {
 			return err
 		}
-		quote, err := priceCheckout(info, input, settings)
-		if err != nil {
-			return err
+		if checkoutVersion(info, pickup) != prepared.Version {
+			return errors.New("checkout_changed")
 		}
+		quote := prepared.Quote
 		if input.ExpectedTotal != nil {
 			expected, _ := moneyCents(*input.ExpectedTotal)
 			actual, _ := moneyCents(quote.TotalAmount)
@@ -67,7 +71,7 @@ func OrderProduct(ctx context.Context, userID string, raw OrderInput) (*models.O
 		if err := tx.Create(&order).Error; err != nil {
 			return err
 		}
-		delivery := models.OrderDelivery{OrderID: order.ID, Recipient: input.Delivery, Pickup: settings.Pickup, Note: input.Note}
+		delivery := models.OrderDelivery{OrderID: order.ID, Recipient: prepared.Recipient, Pickup: prepared.Pickup, Note: input.Note, Shipping: quote.Shipping}
 		if err := tx.Create(&delivery).Error; err != nil {
 			return err
 		}

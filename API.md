@@ -304,59 +304,12 @@ gửi email thực. Không cần Redis/MongoDB cho suite API này. Khi không đ
 `TEST_MYSQL_DSN`, integration suite được skip.
 
 
-## Checkout: địa chỉ nhận và phí giao hàng
+## Checkout và báo phí GHN
 
-Cập nhật cả FE và backend. Shop cần lưu địa chỉ lấy hàng/phí trước khi nhận
-đơn mới. Phí do shop cấu hình theo nội tỉnh/liên tỉnh; ghim bản đồ chỉ hỗ trợ
-xác định vị trí, chưa phải báo giá tự động từ hãng vận chuyển.
-
-- GET/PUT `/api/sales/shipping-settings`: JWT của shop. GET trả
-  `{configured, settings}`. PUT nhận `pickup_address`, `same_province_fee`,
-  `other_province_fee`, `free_shipping_from` (null nếu không áp dụng).
-- POST `/api/orders/quote`: JWT người mua, nhận cùng thông tin sản phẩm,
-  số lượng, phương thức thanh toán và `delivery` như tạo đơn. Trả `unit_price`,
-  `items_subtotal`, `shipping_fee`, `total_amount`, `shipping_zone`,
-  `pickup_province`, `currency: VND`. Báo giá không giữ kho.
-- POST `/api/orders`: bắt buộc thông tin nhận hàng dưới đây; backend kiểm tra
-  lại giá, kho và phí. `expected_total` giúp trả 409 `checkout_changed` khi
-  tổng tiền đổi. `request_id` là UUID cho cùng một lần đặt, gửi lại sẽ trả
-  cùng đơn, không trừ kho hai lần. Dùng lại key với nội dung khác trả 409.
-- Chi tiết đơn của người mua/người bán có `delivery.recipient`,
-  `delivery.pickup`, `delivery.note`, `items_subtotal`, `shipping_fee`.
-  Địa chỉ và phí là bản chụp lúc đặt, không đổi theo cấu hình shop sau đó.
-  Đơn cũ thiếu dữ liệu có `delivery: null`, phí null; không tự điền phí 0.
-
-Ví dụ tạo đơn:
-
-```json
-{
-  "product_id": "<UUID sản phẩm>",
-  "quantity": 2,
-  "payment_method": "cod",
-  "delivery": {
-    "name": "Người nhận",
-    "phone": "0901234567",
-    "province_code": "1",
-    "ward": "Phường nơi nhận",
-    "address_line": "Số nhà, tên đường",
-    "latitude": 21.028511,
-    "longitude": 105.804817
-  },
-  "note": "Gọi trước khi giao",
-  "request_id": "<UUID của lần đặt>",
-  "expected_total": 250000
-}
-```
-
-`latitude`/`longitude` không bắt buộc nhưng phải có đủ cặp nếu gửi. Người dùng
-vẫn đặt được bằng địa chỉ nhập tay khi GPS/bản đồ lỗi. Tên tỉnh lấy từ mã
-tỉnh hợp lệ; mã/tên được chụp từ API v2 của provinces.open-api.vn ngày 17/11/2026
-trong `controller/services/provinces.json`. Tiền được tính bằng đơn vị nhỏ
-trong backend, không lấy giá/phí do client tự khai. `cod` và `bank_transfer`
-là lựa chọn FE; `manual` còn được nhận cho client cũ.
-
-Collection Postman và Test Studio đã có SHIP-001 để cấu hình phí 0 **cho tài
-khoản test** trước các case đơn cũ; payload đặt hàng đã có địa chỉ.
+Xem [SHIPPING.md](SHIPPING.md) cho cấu hình GHN staging, dữ liệu kiện/khu vực,
+contract báo giá và giới hạn chỉ lấy phí. Checkout dùng địa chỉ đầy đủ và mã
+khu vực GHN; chủ live không đặt phí nội tỉnh/liên tỉnh. Backend chỉ gọi danh
+mục và API fee, không tạo vận đơn hay đặt lịch lấy hàng.
 
 ## Danh sách live qua WebSocket
 
@@ -436,43 +389,14 @@ kiểm tra/xác nhận. Sau khi lưu nơi lấy hàng mới, FE mới xin media 
 Có thể chuyển sang Nhập địa chỉ nếu không dùng GPS. Đây là vị trí tại thời
 điểm bắt đầu phát, không phải theo dõi vị trí liên tục.
 
-Checkout trong live dùng nơi lấy hàng của **phiên đó** và mức phí của shop;
+Checkout trong live dùng nơi lấy hàng của **phiên đó** để lấy báo phí hãng;
 đơn ngoài live vẫn dùng địa chỉ shop. Phiên cũ chưa có địa chỉ riêng dùng
 địa chỉ shop như trước. Cập nhật nơi phát không đổi địa chỉ shop hoặc snapshot
 đã lưu trong đơn cũ. Migration thêm `livestream_pickups` và location_mode vào
 các địa chỉ đã có; không cần tự xóa/tạo lại bảng.
 
-### Khắc phục shop có địa chỉ live nhưng thiếu phí ship
+### API báo phí hiện tại
 
-`GET /api/livestreams/:id/pickup` trả thêm `shipping_configured` và
-`shipping_rates` (null nếu chưa có). `PUT` nhận thêm:
-
-```json
-{
-  "pickup_address": { "name": "Shop", "phone": "0901234567", "province_code": "1", "ward": "Phường Ba Đình", "address_line": "12 Đường shop", "location_mode": "manual" },
-  "shipping_rates": {
-    "same_province_fee": 25000,
-    "other_province_fee": 40000,
-    "free_shipping_from": null
-  }
-}
-```
-
-Backend lưu địa chỉ phiên và mức phí trong cùng transaction. Shop chưa có
-cấu hình thì bắt buộc cả hai mức phí; thiếu trả 409 `shipping_not_configured`,
-phí sai/thiếu một mức trả 400 `invalid_shipping_settings`. Không tự gán phí 0.
-Khi tạo cấu hình lần đầu, địa chỉ đã xác nhận cũng là địa chỉ shop ban đầu.
-Shop đã có cấu hình thì việc cập nhật phí không đổi địa chỉ shop; các đơn cũ
-vẫn giữ snapshot. Client cũ có thể bỏ shipping_rates nếu shop đã cấu hình.
-
-FE đưa việc nhập phí vào bước bắt đầu phát. Chủ phiên cũng có thể sửa bằng
-Cài đặt giao hàng trong phòng mà không dừng video; người mua thử tính lại sau
-khi cấu hình được lưu.
-
-`POST /api/orders/quote` chỉ cần khu vực nhận hàng, ví dụ
-`{"product_id":"<UUID>","quantity":1,"delivery":{"province_code":"1"}}`
-(kèm livestream_id khi mua live). payment_method có thể bỏ qua ở bước quote.
-Báo giá không yêu cầu tên/điện thoại/phường/đường, nên FE hiện phí sớm khi chọn
-tỉnh. `POST /api/orders` vẫn yêu cầu đủ thông tin nhận hàng và payment_method;
-việc nới dữ liệu quote không nới điều kiện tạo đơn. Nếu gửi location_mode=current
-vào quote thì tọa độ vẫn phải hợp lệ. Cập nhật backend cùng phiên bản FE này.
+Cơ chế phí cố định do shop nhập đã được thay bằng ShippingService (GHN).
+Xem [SHIPPING.md](SHIPPING.md). GET /api/livestreams/:id/pickup không còn trả
+shipping_rates; PUT chỉ cần pickup_address. Shop không cần nhập phí để phát.

@@ -211,20 +211,22 @@ HTTP status và mã lỗi mong đợi cho cả 106 request. `VALIDATION.md` ghi 
 folder đã chạy xác minh và các phần còn cần OTP thực.
 
 
-Checkout mới yêu cầu địa chỉ nhận và cấu hình giao hàng của shop. Chạy nhóm
-**01b - Giao hàng (tài khoản test)** sau đăng nhập/xác thực và trước HTTP tự động.
-SHIP-001 thiết lập địa chỉ shop và phí 0 cho fixture; không dùng tài khoản shop thật.
-Xem API.md mục Checkout để thử phí nội tỉnh/liên tỉnh khác 0.
+## Báo phí GHN — chỉ lấy phí, không gửi hàng
 
-Có thể thử tự điền địa chỉ bằng `POST {{base_url}}/api/delivery/reverse-geocode`
-với JWT và body `{"latitude":21.028511,"longitude":105.804817}`. Request này cần
-Internet/provider đang hoạt động; chưa nằm trong HTTP regression tự động.
-Trên trình duyệt, chọn Nhập địa chỉ hoặc Sử dụng vị trí hiện tại. Người bán
-xác nhận địa chỉ phiên ở bước Bắt đầu phát; GET/PUT `/api/livestreams/:id/pickup`
-chỉ dành cho chủ phiên. Địa chỉ `location_mode=current` phải có đủ tọa độ.
+Cập nhật backend và frontend cùng phiên bản. Xem [../SHIPPING.md](../SHIPPING.md)
+để cấu hình GHN_ENV=staging, GHN_TOKEN và GHN_SHOP_ID trên backend. Không nhập
+Token GHN vào Postman, Studio hay FE. Những đơn trong collection là đơn nội bộ;
+backend chỉ gọi danh mục/fee của GHN, không tạo vận đơn hay yêu cầu lấy hàng.
 
-Nếu shop đang live nhưng thiếu phí ship, chủ phiên có thể gửi PUT
-`/api/livestreams/{{live_id}}/pickup` với `pickup_address` đầy đủ và
-`shipping_rates` gồm cả `same_province_fee`, `other_province_fee` (xem API.md).
-Địa chỉ và phí lưu cùng transaction. Quote chỉ cần `delivery.province_code`;
-tạo đơn vẫn cần địa chỉ đầy đủ và payment_method.
+Trước nhóm HTTP tự động, lấy mã qua GET /api/shipping/provinces, districts,
+wards (dùng JWT). Điền sáu biến môi trường sau bằng khu vực GHN phù hợp địa
+chỉ Hanoi của fixture: ghn_pickup_province_id, ghn_pickup_district_id,
+ghn_pickup_ward_code, ghn_delivery_province_id, ghn_delivery_district_id,
+ghn_delivery_ward_code. Giá trị 0/rỗng chỉ là chỗ trống, không phải mã hợp lệ.
+Có thể đổi địa chỉ fixture nếu chọn khu vực khác; province_code là mã tỉnh
+hiện tại của app, carrier_* là mã GHN, không hoán đổi hai loại mã này.
+
+SHIP-001 chỉ lưu nơi lấy hàng, không đặt phí 0. Các sản phẩm test có quy cách
+kiện cụ thể. Assertion tổng tiền cộng phí hãng trả về. Bản embedded đã đồng bộ,
+nhưng bộ real-API opt-in/Studio cần cung cấp các biến mã khu vực nói trên;
+những lần xác minh lịch sử trong VALIDATION.md dùng hợp đồng phí cũ.

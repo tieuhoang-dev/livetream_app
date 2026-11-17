@@ -217,3 +217,26 @@ for (const useDefault of [true, false]) {
     assert.deepEqual(backend.calls.map(c => c.path), ['/api/users/register', '/api/users/verify', '/api/users/login']);
   });
 }
+
+test('carrier fixture resolves numeric route IDs without any shipment request', async t => {
+  const folder = collection.item.find(item => item.item?.some(row => row.name.startsWith('SHIP-001')));
+  let received;
+  const server = http.createServer(async (req, res) => {
+    assert.equal(req.url, '/api/sales/shipping-settings');
+    let raw = ''; for await (const chunk of req) raw += chunk;
+    received = JSON.parse(raw);
+    res.writeHead(200, {'Content-Type': 'application/json'});
+    res.end(JSON.stringify({configured: true, settings: received}));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const runner = new TestRunner(collection, {workerFactory, requestInput: async () => { throw new Error('unexpected input'); }});
+  const report = await runner.start({...config, account_mode: 'existing', base_url: `http://127.0.0.1:${server.address().port}`, seller_token: 'fixture-token',
+    ghn_pickup_province_id: '1', ghn_pickup_district_id: '100', ghn_pickup_ward_code: '001'}, [folder.name]);
+  assert.equal(report.failed, 0);
+  assert.equal(report.passed, 1);
+  assert.equal(received.pickup_address.carrier_province_id, 1);
+  assert.equal(received.pickup_address.carrier_district_id, 100);
+  assert.equal(received.pickup_address.carrier_ward_code, '001');
+  assert.ok(!Object.hasOwn(received, 'same_province_fee'));
+});

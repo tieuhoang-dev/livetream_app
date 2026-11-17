@@ -16,18 +16,20 @@ import (
 )
 
 type CreateProductInput struct {
-	Name          string   `json:"name"`
-	Price         *float64 `json:"price"`
-	ImageURL      string   `json:"image_url"`
-	StockQuantity *int     `json:"stock_quantity"`
-	Description   string   `json:"description"`
+	Parcel        *models.ProductParcel `json:"parcel"`
+	Name          string                `json:"name"`
+	Price         *float64              `json:"price"`
+	ImageURL      string                `json:"image_url"`
+	StockQuantity *int                  `json:"stock_quantity"`
+	Description   string                `json:"description"`
 }
 
 type UpdateProductInput struct {
-	Name        *string  `json:"name"`
-	Price       *float64 `json:"price"`
-	ImageURL    *string  `json:"image_url"`
-	Description *string  `json:"description"`
+	Parcel      *models.ProductParcel `json:"parcel"`
+	Name        *string               `json:"name"`
+	Price       *float64              `json:"price"`
+	ImageURL    *string               `json:"image_url"`
+	Description *string               `json:"description"`
 }
 
 type ProductQuery struct {
@@ -66,6 +68,9 @@ func validProductImage(value string) bool {
 }
 
 func CreateProduct(userID string, input CreateProductInput) (*models.Product, error) {
+	if input.Parcel != nil && !validProductParcel(*input.Parcel) {
+		return nil, errors.New("shipping_invalid_parcel")
+	}
 	input.Name, input.ImageURL, input.Description = strings.TrimSpace(input.Name), strings.TrimSpace(input.ImageURL), strings.TrimSpace(input.Description)
 	if !validProductText(input.Name, true) || !validProductText(input.Description, false) || !validProductImage(input.ImageURL) {
 		return nil, errors.New("invalid_product")
@@ -83,6 +88,9 @@ func CreateProduct(userID string, input CreateProductInput) (*models.Product, er
 	product := models.Product{
 		ID: uuid.NewString(), SellerID: userID, Name: input.Name, Price: price,
 		ImageURL: input.ImageURL, StockQuantity: *input.StockQuantity, Description: input.Description,
+	}
+	if input.Parcel != nil {
+		product.Parcel = *input.Parcel
 	}
 	if err := config.DB.Create(&product).Error; err != nil {
 		return nil, err
@@ -134,6 +142,13 @@ func ownedProduct(tx *gorm.DB, userID, productID string) (*models.Product, error
 
 func UpdateProduct(userID, productID string, input UpdateProductInput) (*models.Product, error) {
 	updates := make(map[string]interface{})
+	if input.Parcel != nil {
+		if !validProductParcel(*input.Parcel) {
+			return nil, errors.New("shipping_invalid_parcel")
+		}
+		updates["parcel_weight_grams"], updates["parcel_length_cm"] = input.Parcel.WeightGrams, input.Parcel.LengthCM
+		updates["parcel_width_cm"], updates["parcel_height_cm"] = input.Parcel.WidthCM, input.Parcel.HeightCM
+	}
 	if input.Name != nil {
 		name := strings.TrimSpace(*input.Name)
 		if !validProductText(name, true) {

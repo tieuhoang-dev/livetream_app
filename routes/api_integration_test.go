@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -56,10 +57,14 @@ func TestConnectedAPI(t *testing.T) {
 	}
 	models.MigrateAll(db)
 	oldDB, oldControllerDB := config.DB, controllers.DB
+	oldShipping := config.ShippingProvider
+	carrier := &quoteFixture{}
+	config.ShippingProvider = carrier
 	config.DB = db
 	controllers.SetDatabase(db)
 	t.Cleanup(func() {
 		config.DB = oldDB
+		config.ShippingProvider = oldShipping
 		controllers.SetDatabase(oldControllerDB)
 		sqlDB, _ := db.DB()
 		sqlDB.Close()
@@ -98,9 +103,10 @@ func TestConnectedAPI(t *testing.T) {
 	}
 	seller, buyer, other := newUser(), newUser(), newUser()
 	ids := []string{seller.ID, buyer.ID, other.ID}
-	deliveryFixture := gin.H{"name": "Test receiver", "phone": "0901234567", "province_code": "1", "ward": "Phường thử nghiệm", "address_line": "12 Đường thử nghiệm"}
+	deliveryFixture := gin.H{"name": "Test receiver", "phone": "0901234567", "province_code": "1", "ward": "Phường thử nghiệm", "address_line": "12 Đường thử nghiệm", "carrier_province_id": 1, "carrier_district_id": 100, "carrier_ward_code": "ward-100"}
 	for _, uid := range ids {
 		settings := models.ShippingSettings{SellerID: uid, Pickup: models.DeliveryAddress{Name: "Test shop", Phone: "0901234567", ProvinceCode: "1", ProvinceName: "Thành phố Hà Nội", Ward: "Phường shop", AddressLine: "34 Đường shop"}}
+		settings.Pickup.CarrierProvinceID, settings.Pickup.CarrierDistrictID, settings.Pickup.CarrierWardCode = 1, 100, "ward-100"
 		if err := db.Create(&settings).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -135,6 +141,31 @@ func TestConnectedAPI(t *testing.T) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	call := func(t *testing.T, actor, method, path string, payload interface{}, want int) map[string]interface{} {
 		t.Helper()
+		if values, ok := payload.(gin.H); ok {
+			copy := gin.H{}
+			for k, v := range values {
+				copy[k] = v
+			}
+			for _, field := range []string{"delivery", "pickup_address"} {
+				if address, ok := copy[field].(gin.H); ok {
+					cloned := gin.H{}
+					for k, v := range address {
+						cloned[k] = v
+					}
+					province := 1
+					if fmt.Sprint(cloned["province_code"]) == "79" {
+						province = 79
+					}
+					if _, exists := cloned["carrier_province_id"]; !exists {
+						cloned["carrier_province_id"] = province
+						cloned["carrier_district_id"] = province * 100
+						cloned["carrier_ward_code"] = fmt.Sprintf("ward-%d", province*100)
+					}
+					copy[field] = cloned
+				}
+			}
+			payload = copy
+		}
 		if method == "POST" && (path == "/api/orders" || path == "/api/orders/quote") {
 			if values, ok := payload.(gin.H); ok {
 				cloned := gin.H{}
@@ -183,7 +214,7 @@ func TestConnectedAPI(t *testing.T) {
 	}
 	product := func(t *testing.T, owner string, quantity int) models.Product {
 		t.Helper()
-		out := call(t, owner, "POST", "/api/products", gin.H{"name": "Test product", "price": 100, "stock_quantity": quantity, "image_url": "/uploads/test.png", "description": "Fixture"}, 201)
+		out := call(t, owner, "POST", "/api/products", gin.H{"name": "Test product", "price": 100, "stock_quantity": quantity, "image_url": "/uploads/test.png", "description": "Fixture", "parcel": models.ProductParcel{WeightGrams: 500, LengthCM: 20, WidthCM: 15, HeightCM: 10}}, 201)
 		data, _ := json.Marshal(out)
 		var p models.Product
 		if err := json.Unmarshal(data, &p); err != nil {
@@ -199,6 +230,7 @@ func TestConnectedAPI(t *testing.T) {
 
 	t.Run("protected routes require JWT", func(t *testing.T) {
 		for _, endpoint := range [][2]string{
+			{"GET", "/api/shipping/status"}, {"GET", "/api/shipping/provinces"}, {"GET", "/api/shipping/districts?province_id=1"}, {"GET", "/api/shipping/wards?district_id=100"},
 			{"POST", "/api/products"}, {"PATCH", "/api/products/" + uuid.NewString()},
 			{"DELETE", "/api/products/" + uuid.NewString()}, {"POST", "/api/products/" + uuid.NewString() + "/stock"},
 			{"PUT", "/api/users/me"}, {"POST", "/api/users/me/avatar"}, {"POST", "/api/orders"},
@@ -989,6 +1021,8 @@ func TestConnectedAPI(t *testing.T) {
 	})
 
 	t.Run("checkout uses seller origin and snapshots delivery fees", func(t *testing.T) {
+		carrier.same, carrier.other = 25000, 40000
+		defer func() { carrier.same, carrier.other = 0, 0 }()
 		pickup := gin.H{"name": "Pickup contact", "phone": "0901234567", "province_code": "1", "ward": "Phường shop", "address_line": "Shop address"}
 		body := gin.H{"pickup_address": pickup, "same_province_fee": 25000, "other_province_fee": 40000}
 		call(t, seller.ID, "PUT", "/api/sales/shipping-settings", body, 200)
@@ -1046,6 +1080,7 @@ func TestConnectedAPI(t *testing.T) {
 			remote[key] = value
 		}
 		remote["province_code"] = "79"
+		remote["carrier_province_id"], remote["carrier_district_id"], remote["carrier_ward_code"] = 79, 7900, "ward-7900"
 		input["delivery"] = remote
 		input["request_id"] = uuid.NewString()
 		delete(input, "expected_total")
@@ -1056,14 +1091,16 @@ func TestConnectedAPI(t *testing.T) {
 		body["free_shipping_from"] = 100
 		call(t, seller.ID, "PUT", "/api/sales/shipping-settings", body, 200)
 		free := call(t, buyer.ID, "POST", "/api/orders/quote", input, 200)
-		if free["shipping_fee"] != float64(0) {
-			t.Fatal("free shipping threshold not applied")
+		if free["shipping_fee"] != float64(40000) {
+			t.Fatal("seller setting changed the carrier quote")
 		}
 		call(t, other.ID, "GET", "/api/orders/"+placed["order_id"].(string), nil, 404)
 		call(t, seller.ID, "GET", "/api/sales/orders/"+placed["order_id"].(string), nil, 200)
 	})
 
 	t.Run("live pickup uses broadcast origin and keeps order snapshots private", func(t *testing.T) {
+		carrier.same, carrier.other = 25000, 40000
+		defer func() { carrier.same, carrier.other = 0, 0 }()
 		call(t, "", "POST", "/api/delivery/reverse-geocode", gin.H{"latitude": 21, "longitude": 105}, 401)
 		call(t, buyer.ID, "POST", "/api/delivery/reverse-geocode", gin.H{"latitude": 91, "longitude": 105}, 400)
 		call(t, buyer.ID, "POST", "/api/delivery/reverse-geocode", gin.H{"latitude": 21}, 400)
@@ -1124,73 +1161,113 @@ func TestConnectedAPI(t *testing.T) {
 		call(t, seller.ID, "PUT", path+"/pickup", gin.H{"pickup_address": pickup}, 409)
 	})
 
-	t.Run("first-time seller configures live shipping atomically and buyer can checkout", func(t *testing.T) {
+	t.Run("seller origin saves without seller fees and carrier quotes stay independent", func(t *testing.T) {
+		carrier.same, carrier.other = 25000, 40000
+		defer func() { carrier.same, carrier.other = 0, 0 }()
 		db.Where("seller_id = ?", other.ID).Delete(&models.ShippingSettings{})
-		live := models.Livestream{ID: uuid.NewString(), SellerID: other.ID, Title: "First shipping setup", Status: "start", StartedAt: time.Now()}
+		live := models.Livestream{ID: uuid.NewString(), SellerID: other.ID, Title: "Carrier quote only", Status: "start", StartedAt: time.Now()}
 		if err := db.Create(&live).Error; err != nil {
 			t.Fatal(err)
 		}
 		path := "/api/livestreams/" + live.ID
+		call(t, other.ID, "PUT", path+"/pickup", gin.H{"pickup_address": deliveryFixture}, 200)
 		p := product(t, other.ID, 10)
 		call(t, other.ID, "POST", path+"/products", gin.H{"product_id": p.ID, "discount_price": 80, "stock_quantity": 2}, 201)
-		legacyPickup := models.LivestreamPickup{LivestreamID: live.ID, Address: models.DeliveryAddress{Name: "Legacy shop", Phone: "0901234567", ProvinceCode: "1", ProvinceName: "Thành phố Hà Nội", Ward: "Phường cũ", AddressLine: "Địa chỉ đã lưu trước khi có phí"}}
-		if err := db.Create(&legacyPickup).Error; err != nil {
-			t.Fatal(err)
-		}
-		before := call(t, other.ID, "GET", path+"/pickup", nil, 200)
-		if before["shipping_configured"] != false || before["shipping_rates"] != nil {
-			t.Fatalf("unexpected preset fees: %v", before)
-		}
-		input := gin.H{"product_id": p.ID, "quantity": 1, "livestream_id": live.ID, "delivery": gin.H{"province_code": "1"}}
-		call(t, buyer.ID, "POST", "/api/orders/quote", input, 409)
-		body := gin.H{"pickup_address": deliveryFixture}
-		call(t, other.ID, "PUT", path+"/pickup", body, 409)
-		body["shipping_rates"] = gin.H{"same_province_fee": 25000}
-		call(t, other.ID, "PUT", path+"/pickup", body, 400)
-		var count int64
-		db.Model(&models.LivestreamPickup{}).Where("livestream_id = ?", live.ID).Count(&count)
-		if count != 1 {
-			t.Fatal("failed shipping setup changed existing pickup rows")
-		}
-		var unchanged models.LivestreamPickup
-		db.Take(&unchanged, "livestream_id = ?", live.ID)
-		if unchanged.Address.AddressLine != legacyPickup.Address.AddressLine {
-			t.Fatal("failed shipping setup changed the saved pickup address")
-		}
-		body["shipping_rates"] = gin.H{"same_province_fee": 25000, "other_province_fee": 40000, "free_shipping_from": 100000}
-		call(t, seller.ID, "PUT", path+"/pickup", body, 403)
-		call(t, other.ID, "PUT", path+"/pickup", body, 200)
-		configured := call(t, other.ID, "GET", path+"/pickup", nil, 200)
-		if configured["shipping_configured"] != true || configured["shipping_rates"].(map[string]interface{})["same_province_fee"] != float64(25000) {
-			t.Fatalf("shipping setup not saved: %v", configured)
-		}
-		// Only a province is needed for the quote, while ordering still needs
-		// the complete recipient address and payment choice.
+		area := gin.H{"province_code": "1", "carrier_province_id": 1, "carrier_district_id": 100, "carrier_ward_code": "ward-100"}
+		input := gin.H{"product_id": p.ID, "quantity": 1, "livestream_id": live.ID, "delivery": area}
 		quote := call(t, buyer.ID, "POST", "/api/orders/quote", input, 200)
-		if quote["shipping_fee"] != float64(25000) || quote["total_amount"] != float64(25080) {
-			t.Fatalf("wrong first quote: %v", quote)
+		if quote["shipping_fee"] != float64(25000) || quote["shipping"].(map[string]interface{})["quote_only"] != true {
+			t.Fatal("not a carrier-only quote", quote)
 		}
 		input["payment_method"] = "cod"
 		call(t, buyer.ID, "POST", "/api/orders", input, 400)
 		input["delivery"], input["expected_total"] = deliveryFixture, quote["total_amount"]
 		created := call(t, buyer.ID, "POST", "/api/orders", input, 201)
-		detailPath := "/api/orders/" + created["order_id"].(string)
-		detail := call(t, buyer.ID, "GET", detailPath, nil, 200)
-		if detail["shipping_fee"] != float64(25000) || detail["payment"].(map[string]interface{})["amount"] != float64(25080) {
-			t.Fatalf("checkout did not include shipping: %v", detail)
+		detail := call(t, buyer.ID, "GET", "/api/orders/"+created["order_id"].(string), nil, 200)
+		shipping := detail["delivery"].(map[string]interface{})["shipping"].(map[string]interface{})
+		if shipping["provider"] != "ghn" || shipping["environment"] != "staging" || shipping["quote_only"] != true || detail["payment"].(map[string]interface{})["amount"] != float64(25080) {
+			t.Fatal("missing quote snapshot", detail)
 		}
-		// Zero is allowed only when the seller explicitly supplies it.
-		body["shipping_rates"] = gin.H{"same_province_fee": 0, "other_province_fee": 0, "free_shipping_from": nil}
-		call(t, other.ID, "PUT", path+"/pickup", body, 200)
+		call(t, other.ID, "PUT", path+"/pickup", gin.H{"pickup_address": deliveryFixture, "shipping_rates": gin.H{"same_province_fee": 0, "other_province_fee": 0}}, 200)
 		quote = call(t, buyer.ID, "POST", "/api/orders/quote", input, 200)
-		if quote["shipping_fee"] != float64(0) {
-			t.Fatal("explicit free shipping ignored")
+		if quote["shipping_fee"] != float64(25000) {
+			t.Fatal("seller overwrote carrier fee")
 		}
-		body["shipping_rates"] = gin.H{"same_province_fee": -1, "other_province_fee": 40000}
-		call(t, other.ID, "PUT", path+"/pickup", body, 400)
-		detail = call(t, buyer.ID, "GET", detailPath, nil, 200)
-		if detail["shipping_fee"] != float64(25000) {
-			t.Fatal("shipping edits changed an existing order")
+	})
+
+	t.Run("carrier status catalogs and route validation", func(t *testing.T) {
+		status := call(t, buyer.ID, "GET", "/api/shipping/status", nil, 200)
+		if status["quote_only"] != true || status["environment"] != "staging" || status["token"] != nil {
+			t.Fatal("unsafe provider status", status)
+		}
+		provinces := call(t, buyer.ID, "GET", "/api/shipping/provinces", nil, 200)
+		if len(provinces["data"].([]interface{})) != 2 {
+			t.Fatal(provinces)
+		}
+		call(t, buyer.ID, "GET", "/api/shipping/districts?province_id=1", nil, 200)
+		call(t, buyer.ID, "GET", "/api/shipping/wards?district_id=100", nil, 200)
+		call(t, buyer.ID, "GET", "/api/shipping/districts?province_id=bad", nil, 400)
+		p := product(t, seller.ID, 4)
+		input := gin.H{"product_id": p.ID, "quantity": 1, "delivery": gin.H{"province_code": "1", "carrier_province_id": 79, "carrier_district_id": 7900, "carrier_ward_code": "ward-7900"}}
+		before := carrier.calls.Load()
+		call(t, buyer.ID, "POST", "/api/orders/quote", input, 400)
+		input["delivery"] = gin.H{"province_code": "1", "carrier_province_id": 1, "carrier_district_id": 999, "carrier_ward_code": "ward-100"}
+		call(t, buyer.ID, "POST", "/api/orders/quote", input, 400)
+		input["delivery"] = gin.H{"province_code": "1", "carrier_province_id": 1, "carrier_district_id": 100, "carrier_ward_code": "fake"}
+		call(t, buyer.ID, "POST", "/api/orders/quote", input, 400)
+		if carrier.calls.Load() != before || stock(t, p.ID) != 4 {
+			t.Fatal("invalid route quoted or changed stock")
+		}
+	})
+
+	t.Run("carrier missing configuration or failure never produces a free order", func(t *testing.T) {
+		p := product(t, seller.ID, 3)
+		input := gin.H{"product_id": p.ID, "quantity": 1, "payment_method": "cod", "delivery": deliveryFixture}
+		config.ShippingProvider = nil
+		t.Setenv("GHN_TOKEN", "")
+		t.Setenv("GHN_SHOP_ID", "")
+		defer func() { config.ShippingProvider = carrier; carrier.failure = nil }()
+		status := call(t, buyer.ID, "GET", "/api/shipping/status", nil, 200)
+		if status["configured"] != false {
+			t.Fatal("missing credentials reported configured")
+		}
+		call(t, buyer.ID, "POST", "/api/orders/quote", input, 503)
+		call(t, buyer.ID, "POST", "/api/orders", input, 503)
+		config.ShippingProvider = carrier
+		carrier.failure = errors.New("shipping_unavailable")
+		call(t, buyer.ID, "POST", "/api/orders/quote", input, 502)
+		call(t, buyer.ID, "POST", "/api/orders", input, 502)
+		if stock(t, p.ID) != 3 {
+			t.Fatal("failed quote deducted stock")
+		}
+	})
+
+	t.Run("parcel validation and quote snapshot changes are checked before mutation", func(t *testing.T) {
+		p := product(t, seller.ID, 5)
+		call(t, seller.ID, "PATCH", "/api/products/"+p.ID, gin.H{"parcel": gin.H{"weight_grams": 0, "length_cm": 20, "width_cm": 15, "height_cm": 10}}, 400)
+		call(t, buyer.ID, "PATCH", "/api/products/"+p.ID, gin.H{"parcel": gin.H{"weight_grams": 600, "length_cm": 20, "width_cm": 15, "height_cm": 10}}, 403)
+		input := gin.H{"product_id": p.ID, "quantity": 1, "payment_method": "cod", "delivery": deliveryFixture}
+		db.Model(&models.Product{}).Where("id = ?", p.ID).Update("parcel_weight_grams", 0)
+		call(t, buyer.ID, "POST", "/api/orders/quote", input, 409)
+		db.Model(&models.Product{}).Where("id = ?", p.ID).Update("parcel_weight_grams", 500)
+		carrier.beforeQuote = func() { db.Model(&models.Product{}).Where("id = ?", p.ID).Update("price", 101) }
+		defer func() { carrier.beforeQuote = nil }()
+		call(t, buyer.ID, "POST", "/api/orders", input, 409)
+		if stock(t, p.ID) != 5 {
+			t.Fatal("changed quote mutated stock")
+		}
+	})
+
+	t.Run("idempotent local order retry does not call the carrier again", func(t *testing.T) {
+		p := product(t, seller.ID, 2)
+		input := gin.H{"product_id": p.ID, "quantity": 1, "payment_method": "cod", "delivery": deliveryFixture, "request_id": uuid.NewString()}
+		created := call(t, buyer.ID, "POST", "/api/orders", input, 201)
+		before := carrier.calls.Load()
+		carrier.failure = errors.New("shipping_unavailable")
+		defer func() { carrier.failure = nil }()
+		again := call(t, buyer.ID, "POST", "/api/orders", input, 201)
+		if created["order_id"] != again["order_id"] || carrier.calls.Load() != before || stock(t, p.ID) != 1 {
+			t.Fatal("retry duplicated carrier call/order")
 		}
 	})
 
@@ -1262,7 +1339,7 @@ func TestConnectedAPI(t *testing.T) {
 		base["delivery"] = deliveryFixture
 		base["payment_method"] = "fake-wallet"
 		call(t, buyer.ID, "POST", "/api/orders", base, 400)
-		call(t, buyer.ID, "PUT", "/api/sales/shipping-settings", gin.H{"pickup_address": deliveryFixture, "same_province_fee": -1, "other_province_fee": 0}, 400)
+		call(t, buyer.ID, "PUT", "/api/sales/shipping-settings", gin.H{"pickup_address": deliveryFixture, "same_province_fee": -1, "other_province_fee": 0}, 200)
 		own := call(t, buyer.ID, "GET", "/api/sales/shipping-settings", nil, 200)
 		if !own["configured"].(bool) {
 			t.Fatal("own shipping settings not loaded")

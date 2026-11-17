@@ -23,6 +23,11 @@ func SetupUserRoutes(r *gin.Engine) {
 	SetupProductRoutes(r)
 
 	orderGroup := r.Group("/api/orders", middlewares.AuthMiddleware())
+	shippingGroup := r.Group("/api/shipping", middlewares.AuthMiddleware())
+	shippingGroup.GET("/status", controllers.ShippingStatus)
+	shippingGroup.GET("/provinces", controllers.ShippingProvinces)
+	shippingGroup.GET("/districts", controllers.ShippingDistricts)
+	shippingGroup.GET("/wards", controllers.ShippingWards)
 	orderGroup.GET("", controllers.ListOrders)
 	orderGroup.POST("/quote", controllers.QuoteOrder)
 	orderGroup.GET("/:order_id", controllers.GetOrder)

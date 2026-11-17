@@ -85,4 +85,11 @@ fixture helper chỉ được dùng trong môi trường test riêng, không đ�
 trong app. Lần kiểm tra trước khi thêm SHIP-001: 98/98 case không phụ thuộc gửi email reset đã chạy đạt với backend
 thật; OTP xác nhận dùng fixture trong harness, không mô phỏng email đã gửi.
 
-Checkout yêu cầu chạy nhóm **01b - Giao hàng (tài khoản test)** sau đăng nhập, trước HTTP tự động. Nhóm này cấu hình địa chỉ lấy hàng và phí 0 cho shop test; không chạy bằng tài khoản shop thật.
+Checkout yêu cầu chạy nhóm **01b - Giao hàng (tài khoản test)** sau đăng nhập, trước HTTP tự động. Nhóm này cấu hình địa chỉ lấy hàng cho shop test; không chạy bằng tài khoản shop thật.
+
+ShippingService hiện lấy phí GHN. Với nhóm checkout, cần GHN staging được cấu
+hình trên backend và các biến ghn_pickup_*/ghn_delivery_* hợp lệ trong môi trường
+runner (xem postman/README.md). Bộ test unit của runner không gọi GHN; kết quả
+real-API ghi phía trên là lần chạy theo hợp đồng trước ShippingService.
+
+Trong Cấu hình phiên chạy, mở **Mã khu vực GHN cho nhóm đặt hàng** để điền sáu mã lấy/nhận. Không cần sửa mã nguồn Studio và không đưa Token GHN vào đây.

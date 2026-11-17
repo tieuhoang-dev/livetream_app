@@ -47,17 +47,22 @@ type OrderInput struct {
 	ExpectedTotal *float64               `json:"expected_total"`
 }
 type CheckoutQuote struct {
-	UnitPrice      float64 `json:"unit_price"`
-	Quantity       int     `json:"quantity"`
-	ItemsSubtotal  float64 `json:"items_subtotal"`
-	ShippingFee    float64 `json:"shipping_fee"`
-	TotalAmount    float64 `json:"total_amount"`
-	Currency       string  `json:"currency"`
-	ShippingZone   string  `json:"shipping_zone"`
-	PickupProvince string  `json:"pickup_province"`
+	Shipping       *models.ShippingQuoteSnapshot `json:"shipping"`
+	UnitPrice      float64                       `json:"unit_price"`
+	Quantity       int                           `json:"quantity"`
+	ItemsSubtotal  float64                       `json:"items_subtotal"`
+	ShippingFee    float64                       `json:"shipping_fee"`
+	TotalAmount    float64                       `json:"total_amount"`
+	Currency       string                        `json:"currency"`
+	ShippingZone   string                        `json:"shipping_zone"`
+	PickupProvince string                        `json:"pickup_province"`
 }
 
 func normalizeDeliveryArea(input models.DeliveryAddress) (models.DeliveryAddress, error) {
+	input.CarrierWardCode = strings.TrimSpace(input.CarrierWardCode)
+	if input.CarrierProvinceID < 0 || input.CarrierDistrictID < 0 || len(input.CarrierWardCode) > 32 {
+		return input, errors.New("shipping_address_required")
+	}
 	if input.LocationMode != "" && input.LocationMode != "manual" && input.LocationMode != "current" {
 		return input, errors.New("invalid_delivery_address")
 	}
@@ -159,6 +164,7 @@ func normalizeCheckoutInput(input OrderInput, completeDelivery bool) (OrderInput
 }
 
 type purchaseInfo struct {
+	Parcel   models.ProductParcel
 	Price    float64
 	Stock    int
 	SellerID string
@@ -186,12 +192,18 @@ func checkoutProduct(db *gorm.DB, userID string, input OrderInput, lock bool) (p
 			return info, lookupError(err, "product_not_found_in_livestream")
 		}
 		info = purchaseInfo{Price: p.DiscountPrice, Stock: p.StockQuantity, SellerID: live.SellerID, Target: &p}
+		var product models.Product
+		if err := query().Take(&product, "id = ?", input.ProductID).Error; err != nil {
+			return info, lookupError(err, "product_not_found")
+		}
+		info.Parcel = product.Parcel
 	} else {
 		var p models.Product
 		if err := query().Take(&p, "id = ?", input.ProductID).Error; err != nil {
 			return info, lookupError(err, "product_not_found")
 		}
 		info = purchaseInfo{Price: p.Price, Stock: p.StockQuantity, SellerID: p.SellerID, Target: &p}
+		info.Parcel = p.Parcel
 	}
 	if userID == info.SellerID {
 		return info, errors.New("cannot_buy_own_product")
@@ -201,85 +213,41 @@ func checkoutProduct(db *gorm.DB, userID string, input OrderInput, lock bool) (p
 	}
 	return info, nil
 }
-func shippingPolicy(db *gorm.DB, sellerID string, lock bool) (models.ShippingSettings, error) {
+func checkoutPickup(db *gorm.DB, input OrderInput, sellerID string, lock bool) (models.DeliveryAddress, error) {
+	query := func() *gorm.DB {
+		q := db.Session(&gorm.Session{})
+		if lock {
+			q = q.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		return q
+	}
+	if input.LivestreamID != nil {
+		var pickup models.LivestreamPickup
+		err := query().Take(&pickup, "livestream_id = ?", *input.LivestreamID).Error
+		if err == nil {
+			return pickup.Address, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return models.DeliveryAddress{}, err
+		}
+	}
 	var settings models.ShippingSettings
-	if lock {
-		db = db.Clauses(clause.Locking{Strength: "UPDATE"})
-	}
-	if err := db.Take(&settings, "seller_id = ?", sellerID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return settings, errors.New("shipping_not_configured")
-		}
-		return settings, err
-	}
-	return settings, nil
-}
-func checkoutShippingPolicy(db *gorm.DB, input OrderInput, sellerID string, lock bool) (models.ShippingSettings, error) {
-	settings, err := shippingPolicy(db, sellerID, lock)
-	if err != nil || input.LivestreamID == nil {
-		return settings, err
-	}
-	query := db
-	if lock {
-		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
-	}
-	var pickup models.LivestreamPickup
-	err = query.Take(&pickup, "livestream_id = ?", *input.LivestreamID).Error
+	err := query().Take(&settings, "seller_id = ?", sellerID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return settings, nil // Older lives retain their saved shop origin.
+		return models.DeliveryAddress{}, errors.New("shipping_pickup_required")
 	}
 	if err != nil {
-		return settings, err
+		return models.DeliveryAddress{}, err
 	}
-	settings.Pickup = pickup.Address
-	return settings, nil
-}
-func priceCheckout(info purchaseInfo, input OrderInput, settings models.ShippingSettings) (CheckoutQuote, error) {
-	unit, err := moneyCents(info.Price)
-	if err != nil {
-		return CheckoutQuote{}, err
-	}
-	if unit > 100000000000000/int64(input.Quantity) {
-		return CheckoutQuote{}, errors.New("invalid_price")
-	}
-	subtotal := unit * int64(input.Quantity)
-	fee, zone := settings.OtherProvinceFee, "other_province"
-	if input.Delivery.ProvinceCode == settings.Pickup.ProvinceCode {
-		fee, zone = settings.SameProvinceFee, "same_province"
-	}
-	feeCents, err := moneyCents(fee)
-	if err != nil {
-		return CheckoutQuote{}, err
-	}
-	if settings.FreeShippingFrom != nil {
-		threshold, err := moneyCents(*settings.FreeShippingFrom)
-		if err != nil {
-			return CheckoutQuote{}, err
-		}
-		if subtotal >= threshold {
-			feeCents, zone = 0, "free"
-		}
-	}
-	if subtotal+feeCents > 100000000000000 {
-		return CheckoutQuote{}, errors.New("invalid_price")
-	}
-	return CheckoutQuote{UnitPrice: float64(unit) / 100, Quantity: input.Quantity, ItemsSubtotal: float64(subtotal) / 100, ShippingFee: float64(feeCents) / 100, TotalAmount: float64(subtotal+feeCents) / 100, Currency: "VND", ShippingZone: zone, PickupProvince: settings.Pickup.ProvinceName}, nil
+	return settings.Pickup, nil
 }
 func QuoteOrder(ctx context.Context, userID string, input OrderInput) (CheckoutQuote, error) {
 	input, _, err := normalizeCheckoutInput(input, false)
 	if err != nil {
 		return CheckoutQuote{}, err
 	}
-	db := config.DB.WithContext(ctx)
-	info, err := checkoutProduct(db, userID, input, false)
-	if err != nil {
-		return CheckoutQuote{}, err
-	}
-	settings, err := checkoutShippingPolicy(db, input, info.SellerID, false)
-	if err != nil {
-		return CheckoutQuote{}, err
-	}
-	return priceCheckout(info, input, settings)
+	prepared, err := prepareCheckout(ctx, config.DB.WithContext(ctx), userID, input)
+	return prepared.Quote, err
 }
 func replayOrder(db *gorm.DB, userID, key, hash string) (*models.Order, error) {
 	if key == "" {
@@ -313,16 +281,6 @@ func SaveShippingSettings(ctx context.Context, sellerID string, row models.Shipp
 	}
 	row.Pickup = address
 	row.SellerID = sellerID
-	for _, fee := range []float64{row.SameProvinceFee, row.OtherProvinceFee} {
-		if _, err := moneyCents(fee); err != nil {
-			return nil, errors.New("invalid_shipping_settings")
-		}
-	}
-	if row.FreeShippingFrom != nil {
-		if value, err := moneyCents(*row.FreeShippingFrom); err != nil || value <= 0 {
-			return nil, errors.New("invalid_shipping_settings")
-		}
-	}
 	if err := config.DB.WithContext(ctx).Save(&row).Error; err != nil {
 		return nil, err
 	}

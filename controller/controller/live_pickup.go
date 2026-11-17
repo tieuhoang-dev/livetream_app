@@ -24,11 +24,7 @@ func GetLivePickup(c *gin.Context) {
 		writeServiceError(c, err)
 		return
 	}
-	var rates interface{}
-	if settings != nil {
-		rates = gin.H{"same_province_fee": settings.SameProvinceFee, "other_province_fee": settings.OtherProvinceFee, "free_shipping_from": settings.FreeShippingFrom}
-	}
-	c.JSON(http.StatusOK, gin.H{"pickup_address": address, "shipping_configured": settings != nil, "shipping_rates": rates})
+	c.JSON(http.StatusOK, gin.H{"pickup_address": address, "shipping_configured": settings != nil, "quote_only": true})
 }
 
 func SaveLivePickup(c *gin.Context) {
@@ -37,14 +33,13 @@ func SaveLivePickup(c *gin.Context) {
 		return
 	}
 	var input struct {
-		Address models.DeliveryAddress       `json:"pickup_address"`
-		Rates   *services.ShippingRatesInput `json:"shipping_rates"`
+		Address models.DeliveryAddress `json:"pickup_address"`
 	}
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_delivery_address"})
 		return
 	}
-	address, err := services.SaveLivePickup(c.Request.Context(), uid, c.Param("livestream_id"), input.Address, input.Rates)
+	address, err := services.SaveLivePickup(c.Request.Context(), uid, c.Param("livestream_id"), input.Address)
 	if err != nil {
 		writeServiceError(c, err)
 		return
