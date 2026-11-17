@@ -609,6 +609,7 @@ func HandleWS(ctx *gin.Context) {
 				continue
 			}
 
+			notifyLivestreamsChanged()
 			ack := gin.H{
 				"type": "create_live_success",
 
@@ -645,6 +646,7 @@ func HandleWS(ctx *gin.Context) {
 				continue
 			}
 
+			notifyLivestreamsChanged()
 			ack := gin.H{
 				"type": "end_live_success",
 

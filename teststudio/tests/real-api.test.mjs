@@ -32,7 +32,7 @@ test('browser runner executes the real backend suite with interactive input', {s
   const folders = collection.item.filter(f => !f.name.startsWith('06 -')).map(f => f.name);
   const report = await runner.start({...fixture, base_url: process.env.STUDIO_REAL_API, account_mode: 'new'}, folders);
   assert.equal(report.failed, 0, JSON.stringify(report.results.filter(r => r.status === 'failed')));
-  assert.equal(report.passed, 98); assert.equal(report.status, 'finished');
+  assert.equal(report.passed, 99); assert.equal(report.status, 'finished');
   assert.deepEqual(prompts, ['otp', 'otp', 'file', 'credentials']);
   assert.equal(calls.filter(c => c.url.endsWith('/api/users/register')).length, 3);
   assert.ok(runner.env.live_id && runner.env.ended_live_id);

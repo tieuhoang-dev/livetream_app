@@ -40,5 +40,6 @@ func EndLive(c *gin.Context) {
 		writeServiceError(c, err)
 		return
 	}
+	notifyLivestreamsChanged()
 	c.JSON(http.StatusOK, gin.H{"id": live.ID, "title": live.Title, "status": live.Status, "ended_at": live.EndedAt, "media_closed": mediaClosed})
 }

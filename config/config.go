@@ -37,6 +37,7 @@ func ConnectDatabase() {
 			LogLevel:                  logger.Info,
 			IgnoreRecordNotFoundError: true,
 			Colorful:                  true,
+			ParameterizedQueries:      true,
 		},
 	)
 

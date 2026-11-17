@@ -89,3 +89,19 @@ Redis nhận tin; Postman chưa có API lịch sử chat để truy vấn xác n
 
 Với EDGE-008, dùng hai tab/client gửi đồng thời hoặc bài integration Go có sẵn;
 không dùng nhiều iteration tuần tự của Runner để kết luận chống oversell.
+
+## Danh sách live công khai (WS-016–019)
+
+Mở thêm tab WebSocket tới `{{ws_url}}/api/livestreams/ws`, không cần JWT.
+Copy payload mẫu `WS-016` trong `websocket-messages.json` rồi Send.
+
+| ID | Thao tác | Kết quả mong đợi |
+| --- | --- | --- |
+| WS-016 | Gửi `list_lives` với `query.page=1`, `query.page_size=12` | `list_lives_success`, cùng request_id, data/total/page/page_size; chỉ trường live công khai |
+| WS-017 | Giữ subscription, tạo/kết thúc live ở tab seller hoặc HTTP end | Danh sách tự cập nhật, live đã kết thúc biến mất khi lọc start; chat socket vẫn hoạt động |
+| WS-018 | Gửi lại với status=end/all, q, seller_id/product_id, sort và page khác | Kết quả đúng bộ lọc mới; page_size=101 hoặc UUID sai trả list_lives_error/invalid_query |
+| WS-019 | Ngắt/mở lại tab rồi gửi lại subscription | Nhận snapshot mới; gửi create_live vào kênh công khai bị từ chối, không tạo live |
+
+Đối chiếu FE: đặt hàng trong live phải hiện thông báo thành công và giữ nguyên
+phòng/video. Nút **Xem đơn** trong thông báo là thao tác chủ động rời live;
+không tự chuyển trang đơn sau khi server trả 201.

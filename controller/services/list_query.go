@@ -3,8 +3,8 @@ package services
 import "strings"
 
 type Pagination struct {
-	Page     int `form:"page" binding:"gte=1,lte=1000000"`
-	PageSize int `form:"page_size" binding:"gte=1,lte=100"`
+	Page     int `json:"page" form:"page" binding:"gte=1,lte=1000000"`
+	PageSize int `json:"page_size" form:"page_size" binding:"gte=1,lte=100"`
 }
 
 func (p Pagination) Offset() int {

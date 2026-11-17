@@ -40,7 +40,7 @@ async function fakeBackend(t) {
 }
 
 test('loads every HTTP case and supports the matchers used by the collection', () => {
-  assert.equal(flattenCollection(collection).length, 105);
+  assert.equal(flattenCollection(collection).length, 106);
   expectValue('token').to.be.a('string').and.not.empty;
   expectValue([]).to.eql([]); expectValue({id: 1}).not.to.have.property('user');
   expectValue('012345').to.match(/^\d{6}$/); expectValue([1]).to.have.lengthOf(1);

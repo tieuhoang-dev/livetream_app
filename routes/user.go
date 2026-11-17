@@ -24,6 +24,7 @@ func SetupUserRoutes(r *gin.Engine) {
 
 	orderGroup := r.Group("/api/orders", middlewares.AuthMiddleware())
 	orderGroup.GET("", controllers.ListOrders)
+	orderGroup.POST("/quote", controllers.QuoteOrder)
 	orderGroup.GET("/:order_id", controllers.GetOrder)
 	orderGroup.POST("", controllers.OrderProduct)
 	orderGroup.POST("/:order_id/pay", controllers.PayOrder)
@@ -31,6 +32,8 @@ func SetupUserRoutes(r *gin.Engine) {
 	orderGroup.POST("/:order_id/refund", controllers.RefundOrder)
 
 	salesGroup := r.Group("/api/sales", middlewares.AuthMiddleware())
+	salesGroup.GET("/shipping-settings", controllers.GetShippingSettings)
+	salesGroup.PUT("/shipping-settings", controllers.SaveShippingSettings)
 	salesGroup.GET("/offline", controllers.ListOfflineSales)
 	salesGroup.GET("/offline/:order_id", controllers.GetOfflineSale)
 	salesGroup.GET("/orders", controllers.ListSellerOrders)
@@ -40,14 +43,18 @@ func SetupUserRoutes(r *gin.Engine) {
 
 	publicLiveGroup := r.Group("/api/livestreams")
 	publicLiveGroup.GET("", controllers.ListLivestreams)
+	publicLiveGroup.GET("/ws", controllers.LivestreamFeed)
 	publicLiveGroup.GET("/:livestream_id", controllers.GetLivestream)
 	publicLiveGroup.GET("/:livestream_id/products", controllers.ListLivestreamProducts)
 	liveGroup := r.Group("/api/livestreams", middlewares.AuthMiddleware())
 	liveGroup.GET("/:livestream_id/comments", controllers.ListLivestreamComments)
 	liveGroup.POST("/:livestream_id/comments", controllers.AddLivestreamComment)
 	liveGroup.POST("/:livestream_id/media-token", controllers.CreateLiveMediaSession)
+	liveGroup.GET("/:livestream_id/pickup", controllers.GetLivePickup)
+	liveGroup.PUT("/:livestream_id/pickup", controllers.SaveLivePickup)
 	liveGroup.POST("/:livestream_id/end", controllers.EndLive)
 	liveGroup.POST("/:livestream_id/products", controllers.AddProductToLivestream)
 	liveGroup.DELETE("/:livestream_id/products/:product_id", controllers.RemoveProductFromLivestream)
 	authGroup.GET("/ws", controllers.HandleWS)
+	r.POST("/api/delivery/reverse-geocode", middlewares.AuthMiddleware(), controllers.ReverseGeocode)
 }

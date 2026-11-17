@@ -20,6 +20,9 @@ func MigrateAll(db *gorm.DB) {
 		&Payment{},
 		&LivestreamProduct{},
 		&Livestream{},
+		&ShippingSettings{},
+		&OrderDelivery{},
+		&LivestreamPickup{},
 	)
 
 	if err != nil {

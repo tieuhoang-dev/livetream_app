@@ -20,7 +20,7 @@ func TestEmbeddedRunner(t *testing.T) {
 				var collection struct {
 					Item []json.RawMessage `json:"item"`
 				}
-				if err := json.Unmarshal(response.Body.Bytes(), &collection); err != nil || len(collection.Item) != 7 {
+				if err := json.Unmarshal(response.Body.Bytes(), &collection); err != nil || len(collection.Item) != 8 {
 					t.Fatal("embedded collection is missing or invalid")
 				}
 			}

@@ -12,11 +12,11 @@ import (
 
 type LivestreamQuery struct {
 	Pagination
-	Search    string `form:"q" binding:"max=100"`
-	SellerID  string `form:"seller_id" binding:"omitempty,uuid"`
-	ProductID string `form:"product_id" binding:"omitempty,uuid"`
-	Status    string `form:"status" binding:"required,oneof=start end all"`
-	Sort      string `form:"sort" binding:"required,oneof=newest oldest"`
+	Search    string `json:"q" form:"q" binding:"max=100"`
+	SellerID  string `json:"seller_id" form:"seller_id" binding:"omitempty,uuid"`
+	ProductID string `json:"product_id" form:"product_id" binding:"omitempty,uuid"`
+	Status    string `json:"status" form:"status" binding:"required,oneof=start end all"`
+	Sort      string `json:"sort" form:"sort" binding:"required,oneof=newest oldest"`
 }
 
 type LivestreamView struct {

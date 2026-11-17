@@ -2,6 +2,9 @@
 
 Base URL khi chạy local: `http://localhost:8080`.
 
+Danh sách live trên FE dùng WebSocket công khai `/api/livestreams/ws` theo
+hợp đồng bên dưới. REST danh sách được giữ để tương thích client cũ.
+
 Các route được bảo vệ nhận header `Authorization: Bearer <JWT>` từ API login.
 User phải được xác thực email và có trạng thái `active`. User ID luôn lấy từ JWT,
 không lấy từ request body. WebSocket vẫn giữ route `/api/auth/ws` và hỗ trợ
@@ -103,7 +106,7 @@ Tất cả route bên dưới yêu cầu JWT.
 | GET | `/api/orders/:order_id` | Không cần | 200 |
 | GET | `/api/sales/offline` | Query `status`, `page`, `page_size` | 200 |
 | GET | `/api/sales/offline/:order_id` | Không cần | 200 |
-| POST | `/api/orders` | `product_id`, `quantity`, `payment_method`, tùy chọn `livestream_id` | 201 |
+| POST | `/api/orders` | `product_id`, `quantity`, `payment_method`, `delivery`, tùy chọn `livestream_id` | 201 |
 | POST | `/api/orders/:order_id/pay` | `payment_method` | 200 |
 | POST | `/api/orders/:order_id/cancel` | Không cần | 200 |
 | POST | `/api/orders/:order_id/refund` | `refund_reason` | 200 |
@@ -115,7 +118,11 @@ Ví dụ tạo đơn:
   "product_id": "<UUID sản phẩm>",
   "quantity": 2,
   "payment_method": "manual",
-  "livestream_id": "<UUID live, bỏ trường này nếu mua thông thường>"
+  "livestream_id": "<UUID live, bỏ trường này nếu mua thông thường>",
+  "delivery": {
+    "name": "Người nhận", "phone": "0901234567", "province_code": "1",
+    "ward": "Phường nơi nhận", "address_line": "Số nhà, tên đường"
+  }
 }
 ```
 
@@ -295,3 +302,142 @@ quản lý sản phẩm trong live, OTP reset hết hạn/sai/dùng lại. Test 
 API key để kiểm tra lỗi cấu hình và dùng OTP fixture cho bước xác nhận; không
 gửi email thực. Không cần Redis/MongoDB cho suite API này. Khi không đặt
 `TEST_MYSQL_DSN`, integration suite được skip.
+
+
+## Checkout: địa chỉ nhận và phí giao hàng
+
+Cập nhật cả FE và backend. Shop cần lưu địa chỉ lấy hàng/phí trước khi nhận
+đơn mới. Phí do shop cấu hình theo nội tỉnh/liên tỉnh; ghim bản đồ chỉ hỗ trợ
+xác định vị trí, chưa phải báo giá tự động từ hãng vận chuyển.
+
+- GET/PUT `/api/sales/shipping-settings`: JWT của shop. GET trả
+  `{configured, settings}`. PUT nhận `pickup_address`, `same_province_fee`,
+  `other_province_fee`, `free_shipping_from` (null nếu không áp dụng).
+- POST `/api/orders/quote`: JWT người mua, nhận cùng thông tin sản phẩm,
+  số lượng, phương thức thanh toán và `delivery` như tạo đơn. Trả `unit_price`,
+  `items_subtotal`, `shipping_fee`, `total_amount`, `shipping_zone`,
+  `pickup_province`, `currency: VND`. Báo giá không giữ kho.
+- POST `/api/orders`: bắt buộc thông tin nhận hàng dưới đây; backend kiểm tra
+  lại giá, kho và phí. `expected_total` giúp trả 409 `checkout_changed` khi
+  tổng tiền đổi. `request_id` là UUID cho cùng một lần đặt, gửi lại sẽ trả
+  cùng đơn, không trừ kho hai lần. Dùng lại key với nội dung khác trả 409.
+- Chi tiết đơn của người mua/người bán có `delivery.recipient`,
+  `delivery.pickup`, `delivery.note`, `items_subtotal`, `shipping_fee`.
+  Địa chỉ và phí là bản chụp lúc đặt, không đổi theo cấu hình shop sau đó.
+  Đơn cũ thiếu dữ liệu có `delivery: null`, phí null; không tự điền phí 0.
+
+Ví dụ tạo đơn:
+
+```json
+{
+  "product_id": "<UUID sản phẩm>",
+  "quantity": 2,
+  "payment_method": "cod",
+  "delivery": {
+    "name": "Người nhận",
+    "phone": "0901234567",
+    "province_code": "1",
+    "ward": "Phường nơi nhận",
+    "address_line": "Số nhà, tên đường",
+    "latitude": 21.028511,
+    "longitude": 105.804817
+  },
+  "note": "Gọi trước khi giao",
+  "request_id": "<UUID của lần đặt>",
+  "expected_total": 250000
+}
+```
+
+`latitude`/`longitude` không bắt buộc nhưng phải có đủ cặp nếu gửi. Người dùng
+vẫn đặt được bằng địa chỉ nhập tay khi GPS/bản đồ lỗi. Tên tỉnh lấy từ mã
+tỉnh hợp lệ; mã/tên được chụp từ API v2 của provinces.open-api.vn ngày 17/11/2026
+trong `controller/services/provinces.json`. Tiền được tính bằng đơn vị nhỏ
+trong backend, không lấy giá/phí do client tự khai. `cod` và `bank_transfer`
+là lựa chọn FE; `manual` còn được nhận cho client cũ.
+
+Collection Postman và Test Studio đã có SHIP-001 để cấu hình phí 0 **cho tài
+khoản test** trước các case đơn cũ; payload đặt hàng đã có địa chỉ.
+
+## Danh sách live qua WebSocket
+
+Mở `ws://localhost:8080/api/livestreams/ws` (production HTTPS dùng `wss://`).
+Đây là kênh chỉ đọc, không cần JWT và không thay kết nối chat `/api/auth/ws`.
+Gửi message sau để nhận danh sách và đăng ký cập nhật cùng bộ lọc:
+
+```json
+{
+  "type": "list_lives",
+  "request_id": "catalog-1",
+  "query": {
+    "status": "start",
+    "sort": "newest",
+    "q": "",
+    "page": 1,
+    "page_size": 12
+  }
+}
+```
+
+Response có `type: "list_lives_success"`, cùng `request_id`, và các trường
+`data`, `total`, `page`, `page_size` giống REST. Mặc định `start`, `newest`,
+trang 1, 20 dòng; `page_size` từ 1–100. `query` còn nhận `seller_id`,
+`product_id` là UUID. `status` nhận `start/end/all`, `sort` nhận `newest/oldest`.
+Bộ lọc sai trả `list_lives_error` với `error: "invalid_query"` và không thay
+subscription hợp lệ trước đó. Request mới hợp lệ thay subscription cũ.
+
+Khi tạo/kết thúc live hoặc thêm/xóa sản phẩm khỏi live thành công, server đẩy
+lại snapshot theo bộ lọc hiện tại, kể cả kết thúc qua HTTP. Client không cần
+poll danh sách. Thông báo này được fan-out trong một tiến trình backend;
+nếu triển khai nhiều instance cần nối kênh thông báo liên tiến trình.
+
+Kết nối có ping/pong và giới hạn message 16 KiB. Khi mất kết nối, FE tự mở lại
+với backoff và gửi lại bộ lọc; không chuyển sang REST. FE dùng kênh này tại
+trang khám phá, danh sách chuyển phòng và danh sách live của người bán.
+API chi tiết phiên/sản phẩm, đơn hàng và media token vẫn giữ hợp đồng riêng.
+
+## Vị trí hiện tại và nơi lấy hàng của phiên live
+
+`DeliveryAddress` có thêm `location_mode: "manual" | "current"` (tùy chọn cho
+client cũ). Chế độ `current` bắt buộc cả latitude và longitude, cùng địa chỉ
+đủ tên/điện thoại/tỉnh/phường/đường. Tọa độ GPS không thay tên/số điện thoại
+hoặc số căn hộ; người dùng kiểm tra và bổ sung nếu dữ liệu bản đồ chưa đủ.
+
+`POST /api/delivery/reverse-geocode` cần JWT, body:
+
+```json
+{"latitude":21.028511,"longitude":105.804817}
+```
+
+Response 200 có `address` gồm location_mode=current, province_code/name, ward,
+address_line, latitude/longitude và `attribution`. Tên/điện thoại được giữ trên
+FE, không gửi đến dịch vụ bản đồ. Tỉnh cũ từ provider được ánh xạ về danh mục
+34 tỉnh hiện tại. Ngoài Việt Nam/không xác định tỉnh trả 400
+`location_not_supported`; tọa độ thiếu/sai trả 400 `invalid_coordinates`;
+lỗi dịch vụ trả 503 `geocoding_unavailable`. Không tự dùng địa chỉ cũ khi GPS
+thất bại: FE yêu cầu thử lại hoặc chủ động chọn Nhập địa chỉ.
+
+Backend mặc định gọi Nominatim/OpenStreetMap, tối đa một request/giây trong
+một tiến trình, cache tối đa 256 vị trí trong 10 phút. Có thể cấu hình
+`GEOCODING_REVERSE_URL` trỏ đến dịch vụ reverse tương thích Nominatim; cần
+khởi động lại backend sau khi đổi. Nếu chạy nhiều instance hoặc lưu lượng
+cao, dùng dịch vụ riêng/thích hợp thay vì public endpoint. FE giữ attribution
+OpenStreetMap. Reverse geocoding và tile maps đều cần Internet.
+
+Hai API sau cần JWT **chủ phiên**, không xuất địa chỉ qua danh sách/chi tiết
+live công khai:
+
+- `GET /api/livestreams/:id/pickup`: `{pickup_address: ...}`; nếu chưa có nơi
+  riêng thì dùng địa chỉ shop để điền sẵn, hoặc null khi shop chưa cấu hình.
+- `PUT /api/livestreams/:id/pickup`: body `{pickup_address: DeliveryAddress}`.
+  Lưu địa chỉ cho phiên đang mở; người khác nhận 403, phiên kết thúc nhận 409.
+
+Khi bắt đầu phát, FE mặc định lấy GPS mới, tự điền địa chỉ và xin người bán
+kiểm tra/xác nhận. Sau khi lưu nơi lấy hàng mới, FE mới xin media token.
+Có thể chuyển sang Nhập địa chỉ nếu không dùng GPS. Đây là vị trí tại thời
+điểm bắt đầu phát, không phải theo dõi vị trí liên tục.
+
+Checkout trong live dùng nơi lấy hàng của **phiên đó** và mức phí của shop;
+đơn ngoài live vẫn dùng địa chỉ shop. Phiên cũ chưa có địa chỉ riêng dùng
+địa chỉ shop như trước. Cập nhật nơi phát không đổi địa chỉ shop hoặc snapshot
+đã lưu trong đơn cũ. Migration thêm `livestream_pickups` và location_mode vào
+các địa chỉ đã có; không cần tự xóa/tạo lại bảng.
