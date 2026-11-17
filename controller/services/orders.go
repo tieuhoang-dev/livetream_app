@@ -17,13 +17,15 @@ type OrderQuery struct {
 }
 
 type OrderView struct {
-	ID           string    `json:"id"`
-	LivestreamID *string   `json:"livestream_id"`
-	TotalAmount  float64   `json:"total_amount"`
-	Status       string    `json:"status"`
-	RefundReason string    `json:"refund_reason"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID            string    `json:"id"`
+	LivestreamID  *string   `json:"livestream_id"`
+	TotalAmount   float64   `json:"total_amount"`
+	ItemsSubtotal *float64  `json:"items_subtotal"`
+	ShippingFee   *float64  `json:"shipping_fee"`
+	Status        string    `json:"status"`
+	RefundReason  string    `json:"refund_reason"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type OrderItemView struct {
@@ -42,8 +44,9 @@ type OrderPaymentView struct {
 
 type OrderDetail struct {
 	OrderView
-	Items   []OrderItemView   `json:"items"`
-	Payment *OrderPaymentView `json:"payment"`
+	Items    []OrderItemView       `json:"items"`
+	Payment  *OrderPaymentView     `json:"payment"`
+	Delivery *models.OrderDelivery `json:"delivery"`
 }
 
 func buyerOrders(db *gorm.DB, buyerID string) *gorm.DB {
@@ -133,6 +136,13 @@ func getOrder(orderID string, scope func(*gorm.DB) *gorm.DB) (*OrderDetail, erro
 		}
 		if len(payments) > 0 {
 			detail.Payment = &payments[0]
+		}
+		var delivery []models.OrderDelivery
+		if err := tx.Where("order_id = ?", orderID).Limit(1).Find(&delivery).Error; err != nil {
+			return err
+		}
+		if len(delivery) > 0 {
+			detail.Delivery = &delivery[0]
 		}
 		return nil
 	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})

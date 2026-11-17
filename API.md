@@ -103,7 +103,7 @@ Tất cả route bên dưới yêu cầu JWT.
 | GET | `/api/orders/:order_id` | Không cần | 200 |
 | GET | `/api/sales/offline` | Query `status`, `page`, `page_size` | 200 |
 | GET | `/api/sales/offline/:order_id` | Không cần | 200 |
-| POST | `/api/orders` | `product_id`, `quantity`, `payment_method`, tùy chọn `livestream_id` | 201 |
+| POST | `/api/orders` | `product_id`, `quantity`, `payment_method`, `delivery`, tùy chọn `livestream_id` | 201 |
 | POST | `/api/orders/:order_id/pay` | `payment_method` | 200 |
 | POST | `/api/orders/:order_id/cancel` | Không cần | 200 |
 | POST | `/api/orders/:order_id/refund` | `refund_reason` | 200 |
@@ -115,7 +115,11 @@ Ví dụ tạo đơn:
   "product_id": "<UUID sản phẩm>",
   "quantity": 2,
   "payment_method": "manual",
-  "livestream_id": "<UUID live, bỏ trường này nếu mua thông thường>"
+  "livestream_id": "<UUID live, bỏ trường này nếu mua thông thường>",
+  "delivery": {
+    "name": "Người nhận", "phone": "0901234567", "province_code": "1",
+    "ward": "Phường nơi nhận", "address_line": "Số nhà, tên đường"
+  }
 }
 ```
 
@@ -295,3 +299,58 @@ quản lý sản phẩm trong live, OTP reset hết hạn/sai/dùng lại. Test 
 API key để kiểm tra lỗi cấu hình và dùng OTP fixture cho bước xác nhận; không
 gửi email thực. Không cần Redis/MongoDB cho suite API này. Khi không đặt
 `TEST_MYSQL_DSN`, integration suite được skip.
+
+
+## Checkout: địa chỉ nhận và phí giao hàng
+
+Cập nhật cả FE và backend. Shop cần lưu địa chỉ lấy hàng/phí trước khi nhận
+đơn mới. Phí do shop cấu hình theo nội tỉnh/liên tỉnh; ghim bản đồ chỉ hỗ trợ
+xác định vị trí, chưa phải báo giá tự động từ hãng vận chuyển.
+
+- GET/PUT `/api/sales/shipping-settings`: JWT của shop. GET trả
+  `{configured, settings}`. PUT nhận `pickup_address`, `same_province_fee`,
+  `other_province_fee`, `free_shipping_from` (null nếu không áp dụng).
+- POST `/api/orders/quote`: JWT người mua, nhận cùng thông tin sản phẩm,
+  số lượng, phương thức thanh toán và `delivery` như tạo đơn. Trả `unit_price`,
+  `items_subtotal`, `shipping_fee`, `total_amount`, `shipping_zone`,
+  `pickup_province`, `currency: VND`. Báo giá không giữ kho.
+- POST `/api/orders`: bắt buộc thông tin nhận hàng dưới đây; backend kiểm tra
+  lại giá, kho và phí. `expected_total` giúp trả 409 `checkout_changed` khi
+  tổng tiền đổi. `request_id` là UUID cho cùng một lần đặt, gửi lại sẽ trả
+  cùng đơn, không trừ kho hai lần. Dùng lại key với nội dung khác trả 409.
+- Chi tiết đơn của người mua/người bán có `delivery.recipient`,
+  `delivery.pickup`, `delivery.note`, `items_subtotal`, `shipping_fee`.
+  Địa chỉ và phí là bản chụp lúc đặt, không đổi theo cấu hình shop sau đó.
+  Đơn cũ thiếu dữ liệu có `delivery: null`, phí null; không tự điền phí 0.
+
+Ví dụ tạo đơn:
+
+```json
+{
+  "product_id": "<UUID sản phẩm>",
+  "quantity": 2,
+  "payment_method": "cod",
+  "delivery": {
+    "name": "Người nhận",
+    "phone": "0901234567",
+    "province_code": "1",
+    "ward": "Phường nơi nhận",
+    "address_line": "Số nhà, tên đường",
+    "latitude": 21.028511,
+    "longitude": 105.804817
+  },
+  "note": "Gọi trước khi giao",
+  "request_id": "<UUID của lần đặt>",
+  "expected_total": 250000
+}
+```
+
+`latitude`/`longitude` không bắt buộc nhưng phải có đủ cặp nếu gửi. Người dùng
+vẫn đặt được bằng địa chỉ nhập tay khi GPS/bản đồ lỗi. Tên tỉnh lấy từ mã
+tỉnh hợp lệ; mã/tên được chụp từ API v2 của provinces.open-api.vn ngày 17/11/2026
+trong `controller/services/provinces.json`. Tiền được tính bằng đơn vị nhỏ
+trong backend, không lấy giá/phí do client tự khai. `cod` và `bank_transfer`
+là lựa chọn FE; `manual` còn được nhận cho client cũ.
+
+Collection Postman và Test Studio đã có SHIP-001 để cấu hình phí 0 **cho tài
+khoản test** trước các case đơn cũ; payload đặt hàng đã có địa chỉ.

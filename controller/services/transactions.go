@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"time"
@@ -20,59 +21,74 @@ func lookupError(err error, missing string) error {
 	return err
 }
 
-func OrderProduct(userID, productID string, quantity int, livestreamID *string, paymentMethod string) (*models.Order, error) {
-	if quantity <= 0 {
-		return nil, errors.New("invalid_quantity")
+func OrderProduct(ctx context.Context, userID string, raw OrderInput) (*models.Order, error) {
+	input, hash, err := normalizeOrderInput(raw)
+	if err != nil {
+		return nil, err
+	}
+	db := config.DB.WithContext(ctx)
+	if existing, err := replayOrder(db, userID, input.RequestID, hash); existing != nil || err != nil {
+		return existing, err
 	}
 	var order models.Order
-	err := config.DB.Transaction(func(tx *gorm.DB) error {
-		var price float64
-		var stock int
-		var updateModel interface{}
-		var sellerID string
-		if livestreamID != nil {
-			var live models.Livestream
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&live, "id = ?", *livestreamID).Error; err != nil {
-				return lookupError(err, "livestream_not_found")
-			}
-			if live.Status != "start" {
-				return errors.New("livestream_not_active")
-			}
-			sellerID = live.SellerID
-			var product models.LivestreamProduct
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("livestream_id = ? AND product_id = ?", *livestreamID, productID).First(&product).Error; err != nil {
-				return lookupError(err, "product_not_found_in_livestream")
-			}
-			price, stock, updateModel = product.DiscountPrice, product.StockQuantity, &product
-		} else {
-			var product models.Product
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&product, "id = ?", productID).Error; err != nil {
-				return lookupError(err, "product_not_found")
-			}
-			sellerID = product.SellerID
-			price, stock, updateModel = product.Price, product.StockQuantity, &product
+	err = db.Transaction(func(tx *gorm.DB) error {
+		info, err := checkoutProduct(tx, userID, input, true)
+		if err != nil {
+			return err
 		}
-		if sellerID == userID {
-			return errors.New("cannot_buy_own_product")
+		if existing, err := replayOrder(tx.Clauses(clause.Locking{Strength: "UPDATE"}), userID, input.RequestID, hash); existing != nil || err != nil {
+			if existing != nil {
+				order = *existing
+			}
+			return err
 		}
-		if stock < quantity {
-			return errors.New("insufficient_stock")
+		settings, err := shippingPolicy(tx, info.SellerID, true)
+		if err != nil {
+			return err
 		}
-		order = models.Order{ID: uuid.NewString(), UserID: userID, LivestreamID: livestreamID, TotalAmount: price * float64(quantity), Status: "pending", CreatedAt: time.Now()}
+		quote, err := priceCheckout(info, input, settings)
+		if err != nil {
+			return err
+		}
+		if input.ExpectedTotal != nil {
+			expected, _ := moneyCents(*input.ExpectedTotal)
+			actual, _ := moneyCents(quote.TotalAmount)
+			if expected != actual {
+				return errors.New("checkout_changed")
+			}
+		}
+		order = models.Order{ID: uuid.NewString(), UserID: userID, LivestreamID: input.LivestreamID,
+			TotalAmount: quote.TotalAmount, ItemsSubtotal: &quote.ItemsSubtotal, ShippingFee: &quote.ShippingFee,
+			Status: "pending", CreatedAt: time.Now(), RequestHash: hash,
+		}
+		if input.RequestID != "" {
+			order.RequestKey = &input.RequestID
+		}
 		if err := tx.Create(&order).Error; err != nil {
 			return err
 		}
-		item := models.OrderItem{ID: uuid.NewString(), OrderID: order.ID, ProductID: productID, Quantity: quantity, PriceAtPurchase: price, CreatedAt: time.Now()}
+		delivery := models.OrderDelivery{OrderID: order.ID, Recipient: input.Delivery, Pickup: settings.Pickup, Note: input.Note}
+		if err := tx.Create(&delivery).Error; err != nil {
+			return err
+		}
+		item := models.OrderItem{ID: uuid.NewString(), OrderID: order.ID, ProductID: input.ProductID, Quantity: input.Quantity, PriceAtPurchase: quote.UnitPrice, CreatedAt: time.Now()}
 		if err := tx.Create(&item).Error; err != nil {
 			return err
 		}
-		payment := models.Payment{ID: uuid.NewString(), OrderID: order.ID, Amount: order.TotalAmount, PaymentMethod: paymentMethod, Status: "pending", CreatedAt: time.Now()}
+		payment := models.Payment{ID: uuid.NewString(), OrderID: order.ID, Amount: order.TotalAmount, PaymentMethod: input.PaymentMethod, Status: "pending", CreatedAt: time.Now()}
 		if err := tx.Create(&payment).Error; err != nil {
 			return err
 		}
-		return tx.Model(updateModel).Update("stock_quantity", stock-quantity).Error
+		return tx.Model(info.Target).Update("stock_quantity", info.Stock-input.Quantity).Error
 	})
 	if err != nil {
+		// A concurrent insert of the same request can lose the unique-key race.
+		// Its transaction rolls back; return the committed order without charging stock twice.
+		if input.RequestID != "" {
+			if existing, replayErr := replayOrder(db, userID, input.RequestID, hash); existing != nil || replayErr != nil {
+				return existing, replayErr
+			}
+		}
 		return nil, err
 	}
 	return &order, nil

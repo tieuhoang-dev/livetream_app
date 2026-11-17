@@ -321,6 +321,55 @@
       ]
     },
     {
+      "name": "01b - Giao hàng (tài khoản test)",
+      "item": [
+        {
+          "name": "SHIP-001 | Cấu hình địa chỉ lấy hàng và phí test bằng 0",
+          "request": {
+            "method": "PUT",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{seller_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/sales/shipping-settings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pickup_address\": {\n    \"name\": \"Postman Test Shop\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"34 Đường shop\",\n    \"latitude\": null,\n    \"longitude\": null\n  },\n  \"same_province_fee\": 0,\n  \"other_province_fee\": 0,\n  \"free_shipping_from\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"SHIP-001: HTTP 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Shipping configured\", function () { pm.expect(pm.response.json().configured).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "02 - HTTP tu dong",
       "description": "Chọn riêng folder này trong Collection Runner. Cần 2 tài khoản đã verified, active. Login tự lưu token và user ID; run_id mới cho mỗi lượt. Không cần OTP, WebSocket hoặc DB để chạy folder này.",
       "item": [
@@ -2189,7 +2238,7 @@
             "description": "Đơn input sai / thiếu kho / không có sản phẩm",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"quantity\": -1,\n  \"payment_method\": \"manual\"\n}",
+              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"quantity\": -1,\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2243,7 +2292,7 @@
             "description": "Đơn input sai / thiếu kho / không có sản phẩm",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"quantity\": 99999,\n  \"payment_method\": \"manual\"\n}",
+              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"quantity\": 99999,\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2298,7 +2347,7 @@
             "description": "Đơn input sai / thiếu kho / không có sản phẩm",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"product_id\": \"{{missing_id}}\",\n  \"quantity\": 1,\n  \"payment_method\": \"manual\"\n}",
+              "raw": "{\n  \"product_id\": \"{{missing_id}}\",\n  \"quantity\": 1,\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2353,7 +2402,7 @@
             "description": "Buyer mua 2 sản phẩm",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"quantity\": 2,\n  \"payment_method\": \"manual\"\n}",
+              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"quantity\": 2,\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2988,7 +3037,7 @@
             "description": "Tạo đơn thứ hai để cancel",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"quantity\": 3,\n  \"payment_method\": \"manual\"\n}",
+              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"quantity\": 3,\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3955,7 +4004,7 @@
             "description": "Mua live 2 sản phẩm theo giá 80000",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"product_id\": \"{{live_product_id}}\",\n  \"quantity\": 2,\n  \"livestream_id\": \"{{live_id}}\",\n  \"payment_method\": \"manual\"\n}",
+              "raw": "{\n  \"product_id\": \"{{live_product_id}}\",\n  \"quantity\": 2,\n  \"livestream_id\": \"{{live_id}}\",\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4095,7 +4144,7 @@
             "description": "Tạo đơn live thứ hai để pay/refund",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"product_id\": \"{{live_product_id}}\",\n  \"quantity\": 3,\n  \"livestream_id\": \"{{live_id}}\",\n  \"payment_method\": \"manual\"\n}",
+              "raw": "{\n  \"product_id\": \"{{live_product_id}}\",\n  \"quantity\": 3,\n  \"livestream_id\": \"{{live_id}}\",\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4477,7 +4526,7 @@
             "description": "Không đặt hàng live đã kết thúc",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"product_id\": \"{{live_product_id}}\",\n  \"livestream_id\": \"{{ended_live_id}}\",\n  \"quantity\": 1,\n  \"payment_method\": \"manual\"\n}",
+              "raw": "{\n  \"product_id\": \"{{live_product_id}}\",\n  \"livestream_id\": \"{{ended_live_id}}\",\n  \"quantity\": 1,\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"

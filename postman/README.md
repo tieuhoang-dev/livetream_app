@@ -1,7 +1,7 @@
 # Test Livestream App bằng Postman
 
-Bộ test theo `main` commit `7dc3dd0` của `tieuhoang-dev/livetream_app`.
-Gồm **105 request HTTP có assertion**, bảng test case CSV, file Environment,
+Bộ test cho `tieuhoang-dev/livetream_app`, đã cập nhật hợp đồng checkout có địa chỉ và phí giao hàng.
+Gồm **106 request HTTP có assertion**, bảng test case CSV, file Environment,
 ảnh mẫu và hướng dẫn WebSocket riêng.
 
 Luồng chính cho tài khoản mới: **Đăng ký → lấy OTP → Verify thành công →
@@ -197,6 +197,7 @@ lại folder này, dùng email test mới vì backend không có API xóa tài k
 ```sh
 newman run Livestream_App.postman_collection.json \
   -e my-private-local.postman_environment.json \
+  --folder "01b - Giao hàng (tài khoản test)" \
   --folder "02 - HTTP tu dong" \
   --working-dir . --bail failure
 ```
@@ -206,5 +207,11 @@ Muốn chạy tiếp folder live/avatar bằng CLI, dùng `--export-environment`
 file xuất ở lần tiếp theo. File xuất chứa token/password của bạn, giữ riêng.
 
 `HTTP_TEST_CASES.csv` mở được bằng Excel/Google Sheets, gồm ID, điều kiện, body,
-HTTP status và mã lỗi mong đợi cho cả 105 request. `VALIDATION.md` ghi rõ những
+HTTP status và mã lỗi mong đợi cho cả 106 request. `VALIDATION.md` ghi rõ những
 folder đã chạy xác minh và các phần còn cần OTP thực.
+
+
+Checkout mới yêu cầu địa chỉ nhận và cấu hình giao hàng của shop. Chạy nhóm
+**01b - Giao hàng (tài khoản test)** sau đăng nhập/xác thực và trước HTTP tự động.
+SHIP-001 thiết lập địa chỉ shop và phí 0 cho fixture; không dùng tài khoản shop thật.
+Xem API.md mục Checkout để thử phí nội tỉnh/liên tỉnh khác 0.

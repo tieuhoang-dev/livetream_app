@@ -98,7 +98,17 @@ func TestConnectedAPI(t *testing.T) {
 	}
 	seller, buyer, other := newUser(), newUser(), newUser()
 	ids := []string{seller.ID, buyer.ID, other.ID}
+	deliveryFixture := gin.H{"name": "Test receiver", "phone": "0901234567", "province_code": "1", "ward": "Phường thử nghiệm", "address_line": "12 Đường thử nghiệm"}
+	for _, uid := range ids {
+		settings := models.ShippingSettings{SellerID: uid, Pickup: models.DeliveryAddress{Name: "Test shop", Phone: "0901234567", ProvinceCode: "1", ProvinceName: "Thành phố Hà Nội", Ward: "Phường shop", AddressLine: "34 Đường shop"}}
+		if err := db.Create(&settings).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	t.Cleanup(func() {
+		db.Exec("DELETE FROM order_deliveries WHERE order_id IN (SELECT id FROM orders WHERE user_id IN ?)", ids)
+		db.Where("seller_id IN ?", ids).Delete(&models.ShippingSettings{})
 		db.Exec("DELETE FROM payments WHERE order_id IN (SELECT id FROM orders WHERE user_id IN ?)", ids)
 		db.Exec("DELETE FROM order_items WHERE order_id IN (SELECT id FROM orders WHERE user_id IN ?)", ids)
 		db.Where("user_id IN ?", ids).Delete(&models.Order{})
@@ -124,6 +134,18 @@ func TestConnectedAPI(t *testing.T) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	call := func(t *testing.T, actor, method, path string, payload interface{}, want int) map[string]interface{} {
 		t.Helper()
+		if method == "POST" && (path == "/api/orders" || path == "/api/orders/quote") {
+			if values, ok := payload.(gin.H); ok {
+				cloned := gin.H{}
+				for key, value := range values {
+					cloned[key] = value
+				}
+				if _, ok := cloned["delivery"]; !ok {
+					cloned["delivery"] = deliveryFixture
+				}
+				payload = cloned
+			}
+		}
 		data, err := json.Marshal(payload)
 		if err != nil {
 			t.Fatal(err)
@@ -465,7 +487,8 @@ func TestConnectedAPI(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				payload := fmt.Sprintf(`{"product_id":%q,"quantity":1,"payment_method":"manual"}`, p.ID)
+				encoded, _ := json.Marshal(gin.H{"product_id": p.ID, "quantity": 1, "payment_method": "manual", "delivery": deliveryFixture})
+				payload := string(encoded)
 				req, _ := http.NewRequest("POST", server.URL+"/api/orders", strings.NewReader(payload))
 				req.Header.Set("Content-Type", "application/json")
 				req.Header.Set("Authorization", "Bearer "+tokens[buyer.ID])
@@ -858,6 +881,162 @@ func TestConnectedAPI(t *testing.T) {
 		}
 		call(t, seller.ID, "POST", path+"/media-token", publisher, 409)
 		call(t, buyer.ID, "POST", path+"/media-token", viewer, 409)
+	})
+
+	t.Run("checkout uses seller origin and snapshots delivery fees", func(t *testing.T) {
+		pickup := gin.H{"name": "Pickup contact", "phone": "0901234567", "province_code": "1", "ward": "Phường shop", "address_line": "Shop address"}
+		body := gin.H{"pickup_address": pickup, "same_province_fee": 25000, "other_province_fee": 40000}
+		call(t, seller.ID, "PUT", "/api/sales/shipping-settings", body, 200)
+		t.Cleanup(func() {
+			db.Model(&models.ShippingSettings{}).Where("seller_id = ?", seller.ID).Updates(map[string]interface{}{"same_province_fee": 0, "other_province_fee": 0, "free_shipping_from": nil})
+		})
+		p := product(t, seller.ID, 20)
+		requestID := uuid.NewString()
+		pinned := gin.H{}
+		for key, value := range deliveryFixture {
+			pinned[key] = value
+		}
+		pinned["latitude"] = 21.028511
+		pinned["longitude"] = 105.804817
+		input := gin.H{"product_id": p.ID, "quantity": 2, "payment_method": "cod", "delivery": pinned, "request_id": requestID, "note": "Call first"}
+		quote := call(t, buyer.ID, "POST", "/api/orders/quote", input, 200)
+		if quote["items_subtotal"] != float64(200) || quote["shipping_fee"] != float64(25000) || quote["total_amount"] != float64(25200) {
+			t.Fatal("wrong local shipping quote", quote)
+		}
+		wrong := gin.H{}
+		for key, value := range input {
+			wrong[key] = value
+		}
+		wrong["expected_total"] = 1
+		call(t, buyer.ID, "POST", "/api/orders", wrong, 409)
+		if stock(t, p.ID) != 20 {
+			t.Fatal("stale quote deducted stock")
+		}
+		input["expected_total"] = quote["total_amount"]
+		placed := call(t, buyer.ID, "POST", "/api/orders", input, 201)
+		again := call(t, buyer.ID, "POST", "/api/orders", input, 201)
+		if placed["order_id"] != again["order_id"] || stock(t, p.ID) != 18 {
+			t.Fatal("idempotent checkout duplicated order/stock")
+		}
+		input["quantity"] = 3
+		call(t, buyer.ID, "POST", "/api/orders", input, 409)
+		input["quantity"] = 2
+		detail := call(t, buyer.ID, "GET", "/api/orders/"+placed["order_id"].(string), nil, 200)
+		if detail["payment"].(map[string]interface{})["amount"] != float64(25200) {
+			t.Fatal("payment excluded shipping")
+		}
+		recipient := detail["delivery"].(map[string]interface{})["recipient"].(map[string]interface{})
+		if recipient["name"] != "Test receiver" || recipient["address_line"] != "12 Đường thử nghiệm" || recipient["latitude"] != 21.028511 || recipient["longitude"] != 105.804817 {
+			t.Fatal("delivery snapshot missing")
+		}
+		body["same_province_fee"] = 90000
+		pickup["address_line"] = "New shop"
+		call(t, seller.ID, "PUT", "/api/sales/shipping-settings", body, 200)
+		saved := call(t, buyer.ID, "GET", "/api/orders/"+placed["order_id"].(string), nil, 200)
+		if saved["shipping_fee"] != float64(25000) || saved["delivery"].(map[string]interface{})["pickup"].(map[string]interface{})["address_line"] != "Shop address" {
+			t.Fatal("shop changes mutated old order")
+		}
+		remote := gin.H{}
+		for key, value := range deliveryFixture {
+			remote[key] = value
+		}
+		remote["province_code"] = "79"
+		input["delivery"] = remote
+		input["request_id"] = uuid.NewString()
+		delete(input, "expected_total")
+		remoteQuote := call(t, buyer.ID, "POST", "/api/orders/quote", input, 200)
+		if remoteQuote["shipping_fee"] != float64(40000) {
+			t.Fatal("wrong inter-province fee", remoteQuote)
+		}
+		body["free_shipping_from"] = 100
+		call(t, seller.ID, "PUT", "/api/sales/shipping-settings", body, 200)
+		free := call(t, buyer.ID, "POST", "/api/orders/quote", input, 200)
+		if free["shipping_fee"] != float64(0) {
+			t.Fatal("free shipping threshold not applied")
+		}
+		call(t, other.ID, "GET", "/api/orders/"+placed["order_id"].(string), nil, 404)
+		call(t, seller.ID, "GET", "/api/sales/orders/"+placed["order_id"].(string), nil, 200)
+	})
+
+	t.Run("concurrent retries create one delivery order", func(t *testing.T) {
+		p := product(t, seller.ID, 4)
+		encoded, _ := json.Marshal(gin.H{"product_id": p.ID, "quantity": 2, "payment_method": "cod", "delivery": deliveryFixture, "request_id": uuid.NewString()})
+		type result struct {
+			code int
+			id   string
+		}
+		results := make(chan result, 8)
+		var wait sync.WaitGroup
+		for i := 0; i < 8; i++ {
+			wait.Add(1)
+			go func() {
+				defer wait.Done()
+				req, _ := http.NewRequest("POST", server.URL+"/api/orders", bytes.NewReader(encoded))
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Authorization", "Bearer "+tokens[buyer.ID])
+				response, err := client.Do(req)
+				if err != nil {
+					results <- result{}
+					return
+				}
+				defer response.Body.Close()
+				var body map[string]interface{}
+				json.NewDecoder(response.Body).Decode(&body)
+				id, _ := body["order_id"].(string)
+				results <- result{response.StatusCode, id}
+			}()
+		}
+		wait.Wait()
+		close(results)
+		first := ""
+		for result := range results {
+			if result.code != 201 || result.id == "" {
+				t.Fatal("concurrent retry failed", result)
+			}
+			if first == "" {
+				first = result.id
+			}
+			if first != result.id {
+				t.Fatal("concurrent request created multiple orders")
+			}
+		}
+		if stock(t, p.ID) != 2 {
+			t.Fatal("concurrent retries deducted stock multiple times")
+		}
+	})
+
+	t.Run("delivery validation and shipping policy ownership", func(t *testing.T) {
+		p := product(t, seller.ID, 3)
+		base := gin.H{"product_id": p.ID, "quantity": 1, "payment_method": "cod", "delivery": nil}
+		call(t, buyer.ID, "POST", "/api/orders", base, 400)
+		bad := gin.H{}
+		for key, value := range deliveryFixture {
+			bad[key] = value
+		}
+		bad["latitude"] = 91
+		bad["longitude"] = 105
+		base["delivery"] = bad
+		call(t, buyer.ID, "POST", "/api/orders", base, 400)
+		bad["latitude"] = 21
+		delete(bad, "longitude")
+		call(t, buyer.ID, "POST", "/api/orders", base, 400)
+		bad["latitude"] = nil
+		bad["phone"] = "abc"
+		call(t, buyer.ID, "POST", "/api/orders", base, 400)
+		base["delivery"] = deliveryFixture
+		base["payment_method"] = "fake-wallet"
+		call(t, buyer.ID, "POST", "/api/orders", base, 400)
+		call(t, buyer.ID, "PUT", "/api/sales/shipping-settings", gin.H{"pickup_address": deliveryFixture, "same_province_fee": -1, "other_province_fee": 0}, 400)
+		own := call(t, buyer.ID, "GET", "/api/sales/shipping-settings", nil, 200)
+		if !own["configured"].(bool) {
+			t.Fatal("own shipping settings not loaded")
+		}
+		db.Where("seller_id = ?", other.ID).Delete(&models.ShippingSettings{})
+		otherProduct := product(t, other.ID, 2)
+		call(t, buyer.ID, "POST", "/api/orders/quote", gin.H{"product_id": otherProduct.ID, "quantity": 1, "payment_method": "cod"}, 409)
+		if stock(t, p.ID) != 3 {
+			t.Fatal("invalid delivery changed stock")
+		}
 	})
 
 	t.Run("password reset uses a separate expiring single-use OTP", func(t *testing.T) {

@@ -12,22 +12,17 @@ func OrderProduct(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var input struct {
-		ProductID     string  `json:"product_id" binding:"required,uuid"`
-		Quantity      int     `json:"quantity" binding:"required,gt=0"`
-		LivestreamID  *string `json:"livestream_id" binding:"omitempty,uuid"`
-		PaymentMethod string  `json:"payment_method" binding:"required,max=50"`
-	}
+	var input services.OrderInput
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	order, err := services.OrderProduct(userID, input.ProductID, input.Quantity, input.LivestreamID, input.PaymentMethod)
+	order, err := services.OrderProduct(c.Request.Context(), userID, input)
 	if err != nil {
 		writeServiceError(c, err)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"message": "Order placed successfully", "order_id": order.ID, "total_amount": order.TotalAmount, "status": order.Status})
+	c.JSON(http.StatusCreated, gin.H{"message": "Order placed successfully", "order_id": order.ID, "items_subtotal": order.ItemsSubtotal, "shipping_fee": order.ShippingFee, "total_amount": order.TotalAmount, "status": order.Status})
 }
 
 func PayOrder(c *gin.Context) {

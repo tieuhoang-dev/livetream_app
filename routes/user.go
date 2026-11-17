@@ -24,6 +24,7 @@ func SetupUserRoutes(r *gin.Engine) {
 
 	orderGroup := r.Group("/api/orders", middlewares.AuthMiddleware())
 	orderGroup.GET("", controllers.ListOrders)
+	orderGroup.POST("/quote", controllers.QuoteOrder)
 	orderGroup.GET("/:order_id", controllers.GetOrder)
 	orderGroup.POST("", controllers.OrderProduct)
 	orderGroup.POST("/:order_id/pay", controllers.PayOrder)
@@ -31,6 +32,8 @@ func SetupUserRoutes(r *gin.Engine) {
 	orderGroup.POST("/:order_id/refund", controllers.RefundOrder)
 
 	salesGroup := r.Group("/api/sales", middlewares.AuthMiddleware())
+	salesGroup.GET("/shipping-settings", controllers.GetShippingSettings)
+	salesGroup.PUT("/shipping-settings", controllers.SaveShippingSettings)
 	salesGroup.GET("/offline", controllers.ListOfflineSales)
 	salesGroup.GET("/offline/:order_id", controllers.GetOfflineSale)
 	salesGroup.GET("/orders", controllers.ListSellerOrders)
