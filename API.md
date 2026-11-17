@@ -441,3 +441,38 @@ Checkout trong live dùng nơi lấy hàng của **phiên đó** và mức phí 
 địa chỉ shop như trước. Cập nhật nơi phát không đổi địa chỉ shop hoặc snapshot
 đã lưu trong đơn cũ. Migration thêm `livestream_pickups` và location_mode vào
 các địa chỉ đã có; không cần tự xóa/tạo lại bảng.
+
+### Khắc phục shop có địa chỉ live nhưng thiếu phí ship
+
+`GET /api/livestreams/:id/pickup` trả thêm `shipping_configured` và
+`shipping_rates` (null nếu chưa có). `PUT` nhận thêm:
+
+```json
+{
+  "pickup_address": { "name": "Shop", "phone": "0901234567", "province_code": "1", "ward": "Phường Ba Đình", "address_line": "12 Đường shop", "location_mode": "manual" },
+  "shipping_rates": {
+    "same_province_fee": 25000,
+    "other_province_fee": 40000,
+    "free_shipping_from": null
+  }
+}
+```
+
+Backend lưu địa chỉ phiên và mức phí trong cùng transaction. Shop chưa có
+cấu hình thì bắt buộc cả hai mức phí; thiếu trả 409 `shipping_not_configured`,
+phí sai/thiếu một mức trả 400 `invalid_shipping_settings`. Không tự gán phí 0.
+Khi tạo cấu hình lần đầu, địa chỉ đã xác nhận cũng là địa chỉ shop ban đầu.
+Shop đã có cấu hình thì việc cập nhật phí không đổi địa chỉ shop; các đơn cũ
+vẫn giữ snapshot. Client cũ có thể bỏ shipping_rates nếu shop đã cấu hình.
+
+FE đưa việc nhập phí vào bước bắt đầu phát. Chủ phiên cũng có thể sửa bằng
+Cài đặt giao hàng trong phòng mà không dừng video; người mua thử tính lại sau
+khi cấu hình được lưu.
+
+`POST /api/orders/quote` chỉ cần khu vực nhận hàng, ví dụ
+`{"product_id":"<UUID>","quantity":1,"delivery":{"province_code":"1"}}`
+(kèm livestream_id khi mua live). payment_method có thể bỏ qua ở bước quote.
+Báo giá không yêu cầu tên/điện thoại/phường/đường, nên FE hiện phí sớm khi chọn
+tỉnh. `POST /api/orders` vẫn yêu cầu đủ thông tin nhận hàng và payment_method;
+việc nới dữ liệu quote không nới điều kiện tạo đơn. Nếu gửi location_mode=current
+vào quote thì tọa độ vẫn phải hợp lệ. Cập nhật backend cùng phiên bản FE này.

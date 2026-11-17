@@ -57,24 +57,19 @@ type CheckoutQuote struct {
 	PickupProvince string  `json:"pickup_province"`
 }
 
-func normalizeDelivery(input models.DeliveryAddress) (models.DeliveryAddress, error) {
+func normalizeDeliveryArea(input models.DeliveryAddress) (models.DeliveryAddress, error) {
 	if input.LocationMode != "" && input.LocationMode != "manual" && input.LocationMode != "current" {
 		return input, errors.New("invalid_delivery_address")
 	}
 	if input.LocationMode == "current" && (input.Latitude == nil || input.Longitude == nil) {
 		return input, errors.New("invalid_delivery_address")
 	}
-	input.Name = strings.TrimSpace(input.Name)
-	input.Phone = strings.TrimSpace(input.Phone)
-	input.Phone = strings.NewReplacer(" ", "", "-", "", ".", "").Replace(input.Phone)
-	input.Ward = strings.TrimSpace(input.Ward)
-	input.AddressLine = strings.TrimSpace(input.AddressLine)
-	code, err := strconv.Atoi(input.ProvinceCode)
+	code, err := strconv.Atoi(strings.TrimSpace(input.ProvinceCode))
 	if err == nil {
 		input.ProvinceCode = strconv.Itoa(code)
 	}
 	input.ProvinceName = provinceNames[input.ProvinceCode]
-	if input.Name == "" || utf8.RuneCountInString(input.Name) > 100 || !deliveryPhone.MatchString(input.Phone) || input.ProvinceName == "" || input.Ward == "" || utf8.RuneCountInString(input.Ward) > 100 || input.AddressLine == "" || utf8.RuneCountInString(input.AddressLine) > 255 {
+	if input.ProvinceName == "" {
 		return input, errors.New("invalid_delivery_address")
 	}
 	if (input.Latitude == nil) != (input.Longitude == nil) {
@@ -88,6 +83,20 @@ func normalizeDelivery(input models.DeliveryAddress) (models.DeliveryAddress, er
 	}
 	return input, nil
 }
+func normalizeDelivery(input models.DeliveryAddress) (models.DeliveryAddress, error) {
+	input, err := normalizeDeliveryArea(input)
+	if err != nil {
+		return input, err
+	}
+	input.Name = strings.TrimSpace(input.Name)
+	input.Phone = strings.NewReplacer(" ", "", "-", "", ".", "").Replace(strings.TrimSpace(input.Phone))
+	input.Ward = strings.TrimSpace(input.Ward)
+	input.AddressLine = strings.TrimSpace(input.AddressLine)
+	if input.Name == "" || utf8.RuneCountInString(input.Name) > 100 || !deliveryPhone.MatchString(input.Phone) || input.Ward == "" || utf8.RuneCountInString(input.Ward) > 100 || input.AddressLine == "" || utf8.RuneCountInString(input.AddressLine) > 255 {
+		return input, errors.New("invalid_delivery_address")
+	}
+	return input, nil
+}
 func moneyCents(value float64) (int64, error) {
 	if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > 1e12 {
 		return 0, errors.New("invalid_price")
@@ -95,6 +104,9 @@ func moneyCents(value float64) (int64, error) {
 	return int64(math.Round(value * 100)), nil
 }
 func normalizeOrderInput(input OrderInput) (OrderInput, string, error) {
+	return normalizeCheckoutInput(input, true)
+}
+func normalizeCheckoutInput(input OrderInput, completeDelivery bool) (OrderInput, string, error) {
 	if input.Quantity <= 0 || input.Quantity > 1000000 {
 		return input, "", errors.New("invalid_quantity")
 	}
@@ -107,10 +119,17 @@ func normalizeOrderInput(input OrderInput) (OrderInput, string, error) {
 		}
 	}
 	input.PaymentMethod = strings.TrimSpace(input.PaymentMethod)
+	if !completeDelivery && input.PaymentMethod == "" {
+		input.PaymentMethod = "cod"
+	}
 	if input.PaymentMethod != "cod" && input.PaymentMethod != "bank_transfer" && input.PaymentMethod != "manual" {
 		return input, "", errors.New("invalid_payment_method")
 	}
-	address, err := normalizeDelivery(input.Delivery)
+	normalize := normalizeDeliveryArea
+	if completeDelivery {
+		normalize = normalizeDelivery
+	}
+	address, err := normalize(input.Delivery)
 	if err != nil {
 		return input, "", err
 	}
@@ -247,7 +266,7 @@ func priceCheckout(info purchaseInfo, input OrderInput, settings models.Shipping
 	return CheckoutQuote{UnitPrice: float64(unit) / 100, Quantity: input.Quantity, ItemsSubtotal: float64(subtotal) / 100, ShippingFee: float64(feeCents) / 100, TotalAmount: float64(subtotal+feeCents) / 100, Currency: "VND", ShippingZone: zone, PickupProvince: settings.Pickup.ProvinceName}, nil
 }
 func QuoteOrder(ctx context.Context, userID string, input OrderInput) (CheckoutQuote, error) {
-	input, _, err := normalizeOrderInput(input)
+	input, _, err := normalizeCheckoutInput(input, false)
 	if err != nil {
 		return CheckoutQuote{}, err
 	}

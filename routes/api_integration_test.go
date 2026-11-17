@@ -1124,6 +1124,76 @@ func TestConnectedAPI(t *testing.T) {
 		call(t, seller.ID, "PUT", path+"/pickup", gin.H{"pickup_address": pickup}, 409)
 	})
 
+	t.Run("first-time seller configures live shipping atomically and buyer can checkout", func(t *testing.T) {
+		db.Where("seller_id = ?", other.ID).Delete(&models.ShippingSettings{})
+		live := models.Livestream{ID: uuid.NewString(), SellerID: other.ID, Title: "First shipping setup", Status: "start", StartedAt: time.Now()}
+		if err := db.Create(&live).Error; err != nil {
+			t.Fatal(err)
+		}
+		path := "/api/livestreams/" + live.ID
+		p := product(t, other.ID, 10)
+		call(t, other.ID, "POST", path+"/products", gin.H{"product_id": p.ID, "discount_price": 80, "stock_quantity": 2}, 201)
+		legacyPickup := models.LivestreamPickup{LivestreamID: live.ID, Address: models.DeliveryAddress{Name: "Legacy shop", Phone: "0901234567", ProvinceCode: "1", ProvinceName: "Thành phố Hà Nội", Ward: "Phường cũ", AddressLine: "Địa chỉ đã lưu trước khi có phí"}}
+		if err := db.Create(&legacyPickup).Error; err != nil {
+			t.Fatal(err)
+		}
+		before := call(t, other.ID, "GET", path+"/pickup", nil, 200)
+		if before["shipping_configured"] != false || before["shipping_rates"] != nil {
+			t.Fatalf("unexpected preset fees: %v", before)
+		}
+		input := gin.H{"product_id": p.ID, "quantity": 1, "livestream_id": live.ID, "delivery": gin.H{"province_code": "1"}}
+		call(t, buyer.ID, "POST", "/api/orders/quote", input, 409)
+		body := gin.H{"pickup_address": deliveryFixture}
+		call(t, other.ID, "PUT", path+"/pickup", body, 409)
+		body["shipping_rates"] = gin.H{"same_province_fee": 25000}
+		call(t, other.ID, "PUT", path+"/pickup", body, 400)
+		var count int64
+		db.Model(&models.LivestreamPickup{}).Where("livestream_id = ?", live.ID).Count(&count)
+		if count != 1 {
+			t.Fatal("failed shipping setup changed existing pickup rows")
+		}
+		var unchanged models.LivestreamPickup
+		db.Take(&unchanged, "livestream_id = ?", live.ID)
+		if unchanged.Address.AddressLine != legacyPickup.Address.AddressLine {
+			t.Fatal("failed shipping setup changed the saved pickup address")
+		}
+		body["shipping_rates"] = gin.H{"same_province_fee": 25000, "other_province_fee": 40000, "free_shipping_from": 100000}
+		call(t, seller.ID, "PUT", path+"/pickup", body, 403)
+		call(t, other.ID, "PUT", path+"/pickup", body, 200)
+		configured := call(t, other.ID, "GET", path+"/pickup", nil, 200)
+		if configured["shipping_configured"] != true || configured["shipping_rates"].(map[string]interface{})["same_province_fee"] != float64(25000) {
+			t.Fatalf("shipping setup not saved: %v", configured)
+		}
+		// Only a province is needed for the quote, while ordering still needs
+		// the complete recipient address and payment choice.
+		quote := call(t, buyer.ID, "POST", "/api/orders/quote", input, 200)
+		if quote["shipping_fee"] != float64(25000) || quote["total_amount"] != float64(25080) {
+			t.Fatalf("wrong first quote: %v", quote)
+		}
+		input["payment_method"] = "cod"
+		call(t, buyer.ID, "POST", "/api/orders", input, 400)
+		input["delivery"], input["expected_total"] = deliveryFixture, quote["total_amount"]
+		created := call(t, buyer.ID, "POST", "/api/orders", input, 201)
+		detailPath := "/api/orders/" + created["order_id"].(string)
+		detail := call(t, buyer.ID, "GET", detailPath, nil, 200)
+		if detail["shipping_fee"] != float64(25000) || detail["payment"].(map[string]interface{})["amount"] != float64(25080) {
+			t.Fatalf("checkout did not include shipping: %v", detail)
+		}
+		// Zero is allowed only when the seller explicitly supplies it.
+		body["shipping_rates"] = gin.H{"same_province_fee": 0, "other_province_fee": 0, "free_shipping_from": nil}
+		call(t, other.ID, "PUT", path+"/pickup", body, 200)
+		quote = call(t, buyer.ID, "POST", "/api/orders/quote", input, 200)
+		if quote["shipping_fee"] != float64(0) {
+			t.Fatal("explicit free shipping ignored")
+		}
+		body["shipping_rates"] = gin.H{"same_province_fee": -1, "other_province_fee": 40000}
+		call(t, other.ID, "PUT", path+"/pickup", body, 400)
+		detail = call(t, buyer.ID, "GET", detailPath, nil, 200)
+		if detail["shipping_fee"] != float64(25000) {
+			t.Fatal("shipping edits changed an existing order")
+		}
+	})
+
 	t.Run("concurrent retries create one delivery order", func(t *testing.T) {
 		p := product(t, seller.ID, 4)
 		encoded, _ := json.Marshal(gin.H{"product_id": p.ID, "quantity": 2, "payment_method": "cod", "delivery": deliveryFixture, "request_id": uuid.NewString()})
