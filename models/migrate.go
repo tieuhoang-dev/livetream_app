@@ -1,14 +1,15 @@
 package models
 
 import (
+	"fmt"
 	"log"
 
 	"gorm.io/gorm"
 )
 
-func MigrateAll(db *gorm.DB) {
+func MigrateAll(db *gorm.DB) error {
 	if err := migrateLivestreamProductReference(db); err != nil {
-		log.Fatalf("MySQL livestream product migration failed: %v", err)
+		return fmt.Errorf("livestream product migration: %w", err)
 	}
 	err := db.AutoMigrate(
 		&User{},
@@ -26,8 +27,9 @@ func MigrateAll(db *gorm.DB) {
 	)
 
 	if err != nil {
-		log.Fatalf("MySQL AutoMigrate failed: %v", err)
+		return fmt.Errorf("AutoMigrate: %w", err)
 	}
 
 	log.Println("MySQL AutoMigrate completed successfully")
+	return nil
 }

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"syscall"
+	"time"
 
 	"livesteam_app/internal/devstack"
 )
@@ -96,6 +97,16 @@ func run() (result error) {
 	// Run the binary directly so cancellation cannot leave a go-run child behind.
 	fmt.Println("[dev] Chay API; Ctrl+C de dung API va dependencies vua bat.")
 	api := exec.CommandContext(ctx, binary)
+	// Allow the API to drain HTTP/WS and join workers before stopping Redis.
+	// Windows sends console Ctrl+C to the attached child as well; os.Interrupt
+	// cannot be sent directly with Process.Signal on that platform.
+	api.Cancel = func() error {
+		if runtime.GOOS == "windows" {
+			return nil
+		}
+		return api.Process.Signal(os.Interrupt)
+	}
+	api.WaitDelay = 25 * time.Second
 	api.Dir, api.Env = root, cfg.Environ()
 	api.Stdin, api.Stdout, api.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := api.Run(); err != nil {

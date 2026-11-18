@@ -7,6 +7,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -20,36 +21,36 @@ const (
 	BatchSize = 100
 )
 
-func StartDirectChatWorkers(workerCount int) {
-	ctx := context.Background()
-
-	err := config.RedisClient.XGroupCreateMkStream(
-		ctx,
-		ChatStream,
-		ChatGroup,
-		"0",
-	).Err()
-
+// StartDirectChatWorkers returns a stop function that cancels and joins every
+// worker before the application closes Redis/MongoDB.
+func StartDirectChatWorkers(parent context.Context, workerCount int) (func(), error) {
+	if workerCount < 1 {
+		return nil, fmt.Errorf("invalid chat worker count")
+	}
+	ctx, cancel := context.WithCancel(parent)
+	groupCtx, stopGroup := context.WithTimeout(ctx, 5*time.Second)
+	err := config.RedisClient.XGroupCreateMkStream(groupCtx, ChatStream, ChatGroup, "0").Err()
+	stopGroup()
 	if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
-		log.Fatalf("🔴 Không tạo được Redis consumer group: %v", err)
+		cancel()
+		return nil, fmt.Errorf("create chat consumer group: %w", err)
 	}
-
+	var wg sync.WaitGroup
 	for i := 1; i <= workerCount; i++ {
-		go chatWorker(i)
+		wg.Add(1)
+		go func(id int) { defer wg.Done(); chatWorker(ctx, id) }(i)
 	}
-
-	log.Printf("🟢 Started %d chat workers", workerCount)
+	log.Printf("Started %d direct chat workers", workerCount)
+	return func() { cancel(); wg.Wait() }, nil
 }
 
-func chatWorker(workerID int) {
-	ctx := context.Background()
-
+func chatWorker(ctx context.Context, workerID int) {
 	consumerName := fmt.Sprintf(
 		"worker-%d",
 		workerID,
 	)
 
-	for {
+	for ctx.Err() == nil {
 		streams, err := config.RedisClient.XReadGroup(
 			ctx,
 			&redis.XReadGroupArgs{
@@ -71,6 +72,9 @@ func chatWorker(workerID int) {
 			continue
 		}
 
+		if ctx.Err() != nil {
+			return
+		}
 		if err != nil {
 			log.Printf(
 				"🔴 Worker %d Redis read error: %v",
@@ -78,7 +82,11 @@ func chatWorker(workerID int) {
 				err,
 			)
 
-			time.Sleep(time.Second)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Second):
+			}
 			continue
 		}
 
@@ -88,6 +96,7 @@ func chatWorker(workerID int) {
 			}
 
 			err := saveBatchToMongo(
+				ctx,
 				stream.Messages,
 			)
 
@@ -152,6 +161,7 @@ func chatWorker(workerID int) {
 }
 
 func saveBatchToMongo(
+	parent context.Context,
 	messages []redis.XMessage,
 ) error {
 
@@ -181,7 +191,7 @@ func saveBatchToMongo(
 	}
 
 	mongoCtx, cancel := context.WithTimeout(
-		context.Background(),
+		parent,
 		10*time.Second,
 	)
 

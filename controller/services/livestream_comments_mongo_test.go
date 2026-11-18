@@ -72,7 +72,9 @@ func mongoCommentFixture(t *testing.T) (*gorm.DB, *mongo.Collection, models.Live
 	oldDB, oldCollection := config.DB, config.ChatCollection
 	config.DB, config.ChatCollection = db, collection
 	t.Cleanup(func() { config.DB, config.ChatCollection = oldDB, oldCollection })
-	config.EnsureMongoIndexes()
+	if err := config.EnsureMongoIndexes(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	return db, collection, live
 }
 

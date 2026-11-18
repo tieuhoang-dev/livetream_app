@@ -74,3 +74,24 @@ Remove-Item Env:DEVSTACK_DOCKER_TEST
 ```
 
 Các test MySQL hiện có cần `TEST_MYSQL_DSN` trỏ đến database dùng cho test.
+
+
+## Khởi động và dừng backend
+
+`go run ./cmd` nạp `.env` nếu có; có thể chỉ dùng biến môi trường. Biến đã
+đặt trong terminal luôn được ưu tiên. `DATABASE_URL`, `MONGO_URI`, `JWT_SECRET`
+phải có; `PORT` mặc định 8080. `DATABASE_URL` nhận `mysql://user:password@host:port/database`
+(password có ký tự đặc biệt cần URL-encode), hoặc DSN chuẩn của Go MySQL.
+`MONGO_DATABASE` tùy chọn, mặc định vẫn `livestream_app`.
+
+Startup mở MySQL và migrate, mở Mongo/import comment cũ/tạo index, mở Redis,
+đăng ký router rồi chạy worker và nhận request. Lỗi ở bước nào được trả về
+entrypoint kèm tên bước; kết nối đã mở được đóng lại. Lỗi tạo index Mongo
+cũng dừng startup thay vì chạy tiếp với index chưa sẵn sàng.
+
+Ctrl+C/SIGTERM dừng nhận HTTP và chờ request hiện tại tối đa 10 giây, đóng
+WebSocket qua root service, hủy/join worker chat và kiểm tra tín hiệu live,
+rồi mới đóng Redis/Mongo/MySQL. Worker Redis đang chờ đọc có thể cần khoảng
+5 giây để thoát. Launcher dev chuyển tín hiệu cho API trước khi dừng Redis
+mà nó sở hữu; sau 25 giây mới buộc dừng child bị treo. Trên Windows, console
+Ctrl+C được gửi tới child cùng console.
