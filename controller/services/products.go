@@ -33,11 +33,12 @@ type UpdateProductInput struct {
 }
 
 type ProductQuery struct {
-	Page     int    `form:"page" binding:"gte=1,lte=1000000"`
-	PageSize int    `form:"page_size" binding:"gte=1,lte=100"`
-	SellerID string `form:"seller_id" binding:"omitempty,uuid"`
-	Search   string `form:"q" binding:"max=100"`
-	InStock  bool   `form:"in_stock"`
+	Page                int    `form:"page" binding:"gte=1,lte=1000000"`
+	PageSize            int    `form:"page_size" binding:"gte=1,lte=100"`
+	SellerID            string `form:"seller_id" binding:"omitempty,uuid"`
+	Search              string `form:"q" binding:"max=100"`
+	InStock             bool   `form:"in_stock"`
+	ExcludeLivestreamID string `form:"exclude_livestream_id" binding:"omitempty,uuid"`
 }
 
 func productPrice(price float64) (float64, error) {
@@ -68,6 +69,10 @@ func validProductImage(value string) bool {
 }
 
 func CreateProduct(userID string, input CreateProductInput) (*models.Product, error) {
+	return createProduct(config.DB, userID, input)
+}
+
+func createProduct(tx *gorm.DB, userID string, input CreateProductInput) (*models.Product, error) {
 	if input.Parcel != nil && !validProductParcel(*input.Parcel) {
 		return nil, errors.New("shipping_invalid_parcel")
 	}
@@ -92,7 +97,7 @@ func CreateProduct(userID string, input CreateProductInput) (*models.Product, er
 	if input.Parcel != nil {
 		product.Parcel = *input.Parcel
 	}
-	if err := config.DB.Create(&product).Error; err != nil {
+	if err := tx.Create(&product).Error; err != nil {
 		return nil, err
 	}
 	return &product, nil
@@ -111,6 +116,9 @@ func ListProducts(input ProductQuery) ([]models.Product, int64, error) {
 	}
 	if input.InStock {
 		query = query.Where("stock_quantity > 0")
+	}
+	if input.ExcludeLivestreamID != "" {
+		query = query.Where("NOT EXISTS (?)", config.DB.Model(&models.LivestreamProduct{}).Select("1").Where("livestream_products.product_id = products.id AND livestream_products.livestream_id = ? AND status <> ?", input.ExcludeLivestreamID, removedLivestreamProduct))
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -222,27 +230,22 @@ func AdjustProductStock(userID, productID string, delta int) (*models.Product, e
 	return product, err
 }
 
+// Archive the catalog row while preserving order and live snapshots.
 func DeleteProduct(userID, productID string) error {
-	return config.DB.Transaction(func(tx *gorm.DB) error {
+	err := config.DB.Transaction(func(tx *gorm.DB) error {
 		product, err := ownedProduct(tx, userID, productID)
 		if err != nil {
 			return err
 		}
-		// Keep products referenced by live stock allocations or historical order
-		// items, so removing a product cannot break restocking or order history.
-		var references int64
-		if err := tx.Model(&models.LivestreamProduct{}).Where("product_id = ?", productID).Count(&references).Error; err != nil {
-			return err
-		}
-		if references > 0 {
-			return errors.New("product_in_use")
-		}
-		if err := tx.Model(&models.OrderItem{}).Where("product_id = ?", productID).Count(&references).Error; err != nil {
-			return err
-		}
-		if references > 0 {
-			return errors.New("product_in_use")
-		}
 		return tx.Delete(product).Error
 	})
+	if err == nil {
+		var ids []string
+		config.DB.Model(&models.LivestreamProduct{}).Where("product_id = ?", productID).Distinct().Pluck("livestream_id", &ids)
+		for _, id := range ids {
+			liveChanged(id)
+			shippingChanged(id)
+		}
+	}
+	return err
 }

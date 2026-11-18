@@ -4,8 +4,6 @@ import (
 	"livesteam_app/controller/services"
 	"livesteam_app/utils"
 	"net/http"
-	"path/filepath"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -168,19 +166,7 @@ func UploadAvatar(c *gin.Context) {
 	if !ok {
 		return
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
-	file, err := c.FormFile("file")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "An image file up to 10 MB is required"})
-		return
-	}
-	switch strings.ToLower(filepath.Ext(file.Filename)) {
-	case ".jpg", ".jpeg", ".png", ".webp":
-	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid avatar image format"})
-		return
-	}
-	url, err := utils.UploadFile(c, "file")
+	url, err := utils.UploadImage(c, "file", "avatars")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

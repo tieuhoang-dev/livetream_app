@@ -194,6 +194,9 @@ func checkoutProduct(db *gorm.DB, userID string, input OrderInput, lock bool) (p
 		if err := query().Where("livestream_id = ? AND product_id = ?", *input.LivestreamID, input.ProductID).Take(&p).Error; err != nil {
 			return info, lookupError(err, "product_not_found_in_livestream")
 		}
+		if p.Status != "active" {
+			return info, errors.New("product_not_found_in_livestream")
+		}
 		info = purchaseInfo{Price: p.DiscountPrice, Stock: p.StockQuantity, SellerID: live.SellerID, Target: &p}
 		var product models.Product
 		if err := query().Take(&product, "id = ?", input.ProductID).Error; err != nil {

@@ -40,3 +40,22 @@ qua protocol mới và không gửi lại live.create khi chưa rõ kết quả.
 Báo phí chỉ gọi danh mục/fee GHN. Không dùng create/preview/booking của hãng.
 Xem [REALTIME.md](../REALTIME.md) và [SHIPPING.md](../SHIPPING.md) cho payload
 đầy đủ, thiết lập staging và giới hạn bưu cục/quyền tài khoản.
+
+
+## Vòng đời, ảnh và xóa mềm (tài khoản test)
+
+- Tạo live bằng `live.create` trong tab seller; tab guest đang subscribe danh
+  sách phải thấy phiên mới mà không reload. Bắt đầu camera trong 90 giây.
+- Đóng tab phát/tắt mạng: sau khoảng 90 giây kể từ lần thấy publisher cuối,
+  cộng chu kỳ kiểm tra 15 giây, list/phòng nhận end; kho chưa bán được trả một
+  lần. Giữ tab viewer/chat mở không kéo dài live. Kết nối phát lại trong grace
+  thì tiếp tục phiên. Khởi động lại BE không reset deadline đã lưu.
+- Logout seller qua FE (`live.logout`): mọi live của seller kết thúc, live của
+  người khác giữ nguyên. Gửi `live.end` lại không đổi ended_at/kho.
+- POST `/api/products/images` với JWT và multipart file PNG/JPG/WebP; lấy url
+  để tạo sản phẩm hoặc dùng `live.products.create` theo REALTIME.md. Tạo trong
+  live vượt tồn kho phải rollback cả catalog lẫn allocation.
+- Dùng sản phẩm test riêng: đặt một đơn, DELETE catalog nhận 204, GET/quote
+  mới nhận 404, row SQL vẫn có deleted_at. Đơn cũ đọc/hủy/hoàn được; kết thúc
+  live trả kho đúng cả khi sản phẩm đã archive. Không dùng fixture product_id
+  chính giữa chuỗi HTTP tự động vì các bước sau còn mua sản phẩm đó.

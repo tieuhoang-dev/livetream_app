@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"livesteam_app/config"
+	"livesteam_app/controller/services"
 	"livesteam_app/models"
 	"livesteam_app/routes"
 	"livesteam_app/utils"
@@ -117,7 +118,7 @@ func TestConnectedAPI(t *testing.T) {
 		db.Where("user_id IN ?", ids).Delete(&models.Order{})
 		db.Exec("DELETE FROM livestream_products WHERE livestream_id IN (SELECT id FROM livestreams WHERE seller_id IN ?)", ids)
 		db.Where("seller_id IN ?", ids).Delete(&models.Livestream{})
-		db.Where("seller_id IN ?", ids).Delete(&models.Product{})
+		db.Unscoped().Where("seller_id IN ?", ids).Delete(&models.Product{})
 		db.Where("id IN ?", ids).Delete(&models.User{})
 	})
 	tokens := map[string]string{}
@@ -401,7 +402,6 @@ func TestConnectedAPI(t *testing.T) {
 		call(t, buyer.ID, "POST", "/api/orders", gin.H{"product_id": uuid.NewString(), "quantity": 1, "payment_method": "manual"}, 404)
 		call(t, seller.ID, "POST", "/api/orders", gin.H{"product_id": p.ID, "quantity": 1, "payment_method": "manual"}, 403)
 		id := order(t, p, nil, 2)
-		call(t, seller.ID, "DELETE", "/api/products/"+p.ID, nil, 409)
 		call(t, seller.ID, "PATCH", "/api/products/"+p.ID, gin.H{"price": 120}, 200)
 		if stock(t, p.ID) != 3 {
 			t.Fatal("stock was not deducted")
@@ -440,7 +440,6 @@ func TestConnectedAPI(t *testing.T) {
 		if stock(t, p.ID) != 5 || payment.Status != "refunded" || payment.Amount != 200 {
 			t.Fatal("refund did not restore stock once and synchronize payment")
 		}
-		call(t, seller.ID, "DELETE", "/api/products/"+p.ID, nil, 409)
 		cancelID := order(t, p, nil, 1)
 		call(t, buyer.ID, "POST", "/api/orders/"+cancelID+"/cancel", nil, 200)
 		call(t, buyer.ID, "POST", "/api/orders/"+cancelID+"/cancel", nil, 409)
@@ -648,7 +647,6 @@ func TestConnectedAPI(t *testing.T) {
 		call(t, buyer.ID, "POST", path, payload, 403)
 		call(t, seller.ID, "POST", path, gin.H{"product_id": foreign.ID, "discount_price": 80, "stock_quantity": 1}, 403)
 		call(t, seller.ID, "POST", path, payload, 201)
-		call(t, seller.ID, "DELETE", "/api/products/"+p.ID, nil, 409)
 		call(t, seller.ID, "PATCH", "/api/products/"+p.ID, gin.H{"price": 110, "name": "Updated catalog name"}, 200)
 		var attached models.LivestreamProduct
 		db.First(&attached, "livestream_id = ? AND product_id = ?", liveID, p.ID)
@@ -1401,6 +1399,290 @@ func TestConnectedAPI(t *testing.T) {
 		call(t, buyer.ID, "POST", "/api/orders/quote", gin.H{"product_id": otherProduct.ID, "quantity": 1, "payment_method": "cod"}, 409)
 		if stock(t, p.ID) != 3 {
 			t.Fatal("invalid delivery changed stock")
+		}
+	})
+
+	t.Run("upload product images without changing avatar and reject forged image files", func(t *testing.T) {
+		png, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j1ioAAAAASUVORK5CYII=")
+		var before models.User
+		db.First(&before, "id = ?", seller.ID)
+		upload := func(actor, name string, data []byte, want int) map[string]string {
+			t.Helper()
+			var body bytes.Buffer
+			form := multipart.NewWriter(&body)
+			part, _ := form.CreateFormFile("file", name)
+			part.Write(data)
+			form.Close()
+			req, _ := http.NewRequest("POST", server.URL+"/api/products/images", &body)
+			req.Header.Set("Content-Type", form.FormDataContentType())
+			if actor != "" {
+				req.Header.Set("Authorization", "Bearer "+tokens[actor])
+			}
+			response, err := client.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			var out map[string]string
+			json.NewDecoder(response.Body).Decode(&out)
+			if response.StatusCode != want {
+				t.Fatalf("upload: %d %v", response.StatusCode, out)
+			}
+			return out
+		}
+		upload("", "photo.png", png, 401)
+		upload(seller.ID, "fake.png", []byte("<svg onload='alert(1)'></svg>"), 400)
+		upload(seller.ID, "empty.png", nil, 400)
+		upload(seller.ID, "huge.png", make([]byte, (10<<20)+1), 400)
+		out := upload(seller.ID, "../../photo.exe", png, 201)
+		if !strings.HasPrefix(out["url"], "/uploads/products/") || !strings.HasSuffix(out["url"], ".png") {
+			t.Fatal(out)
+		}
+		response, err := client.Get(server.URL + out["url"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		data, _ := io.ReadAll(response.Body)
+		if !bytes.Equal(data, png) {
+			t.Fatal("image did not survive upload/download")
+		}
+		var after models.User
+		db.First(&after, "id = ?", seller.ID)
+		if after.Avatar != before.Avatar {
+			t.Fatal("product upload changed seller avatar")
+		}
+		p := call(t, seller.ID, "POST", "/api/products", gin.H{"name": "Uploaded product", "price": 100, "stock_quantity": 2, "image_url": out["url"], "parcel": gin.H{"weight_grams": 500, "length_cm": 20, "width_cm": 15, "height_cm": 10}}, 201)
+		detail := call(t, "", "GET", "/api/products/"+p["id"].(string), nil, 200)
+		if detail["image_url"] != out["url"] || detail["parcel"].(map[string]interface{})["weight_grams"] != float64(500) {
+			t.Fatal(detail)
+		}
+	})
+
+	t.Run("websocket creates products atomically and removal retains allocation history", func(t *testing.T) {
+		ws := dialRealtime(t, server.URL, tokens[seller.ID])
+		foreign := dialRealtime(t, server.URL, tokens[buyer.ID])
+		liveID := ws.command(t, "live.create", gin.H{"title": "Inline products"}, 200)["id"].(string)
+		payload := gin.H{"livestream_id": liveID, "product": gin.H{"name": "Inline " + uuid.NewString(), "price": 100, "stock_quantity": 4, "parcel": gin.H{"weight_grams": 500, "length_cm": 20, "width_cm": 15, "height_cm": 10}}, "discount_price": 80, "stock_quantity": 5, "is_pinned": true}
+		var before, after int64
+		db.Model(&models.Product{}).Count(&before)
+		ws.command(t, "live.products.create", payload, 409)
+		db.Model(&models.Product{}).Count(&after)
+		if before != after {
+			t.Fatal("failed reservation left an orphan product")
+		}
+		payload["stock_quantity"] = 2
+		foreign.command(t, "live.products.create", payload, 403)
+		created := ws.command(t, "live.products.create", payload, 200)
+		productID := created["product_id"].(string)
+		if stock(t, productID) != 2 {
+			t.Fatal("inline reserve was not atomic")
+		}
+		catalog := call(t, "", "GET", "/api/products?seller_id="+seller.ID+"&exclude_livestream_id="+liveID, nil, 200)
+		for _, raw := range catalog["data"].([]interface{}) {
+			if raw.(map[string]interface{})["id"] == productID {
+				t.Fatal("already allocated product remained in picker")
+			}
+		}
+		var allocation models.LivestreamProduct
+		db.First(&allocation, "livestream_id = ? AND product_id = ?", liveID, productID)
+		remove := gin.H{"livestream_id": liveID, "product_id": productID}
+		ws.command(t, "live.products.remove", remove, 200)
+		var kept models.LivestreamProduct
+		db.First(&kept, "id = ?", allocation.ID)
+		if kept.ID == "" || kept.Status != "removed" || kept.StockQuantity != 0 || stock(t, productID) != 4 {
+			t.Fatal("removal deleted history or lost stock")
+		}
+		ws.command(t, "live.products.remove", remove, 200)
+		if stock(t, productID) != 4 {
+			t.Fatal("repeated removal restored stock twice")
+		}
+		ws.command(t, "live.products.add", gin.H{"livestream_id": liveID, "product_id": productID, "discount_price": 70, "stock_quantity": 1}, 200)
+		db.First(&kept, "id = ?", allocation.ID)
+		if kept.Status != "active" || kept.StockQuantity != 1 {
+			t.Fatal("product cannot be added again after removal")
+		}
+		ws.command(t, "live.end", gin.H{"livestream_id": liveID}, 200)
+		if stock(t, productID) != 4 {
+			t.Fatal("live end restored wrong stock")
+		}
+		ws.command(t, "live.products.create", payload, 409)
+	})
+
+	t.Run("soft deletion hides products while historical orders and stock restoration work", func(t *testing.T) {
+		ws := dialRealtime(t, server.URL, tokens[seller.ID])
+		liveID := ws.command(t, "live.create", gin.H{"title": "Archive history"}, 200)["id"].(string)
+		p := product(t, seller.ID, 10)
+		offlineID := order(t, p, nil, 1)
+		ws.command(t, "live.products.add", gin.H{"livestream_id": liveID, "product_id": p.ID, "discount_price": 80, "stock_quantity": 6}, 200)
+		liveOrder := order(t, p, &liveID, 2)
+		call(t, seller.ID, "POST", "/api/sales/orders/"+liveOrder+"/pay", gin.H{"payment_method": "manual"}, 200)
+		sub := ws.subscribe(t, "live.subscribe", gin.H{"livestream_id": liveID})
+		ws.event(t, sub, "snapshot")
+		call(t, seller.ID, "DELETE", "/api/products/"+p.ID, nil, 204)
+		var archived models.Product
+		db.Unscoped().First(&archived, "id = ?", p.ID)
+		if !archived.DeletedAt.Valid {
+			t.Fatal("product was hard deleted")
+		}
+		call(t, "", "GET", "/api/products/"+p.ID, nil, 404)
+		call(t, buyer.ID, "POST", "/api/orders/quote", gin.H{"product_id": p.ID, "quantity": 1, "payment_method": "cod", "delivery": deliveryFixture}, 404)
+		call(t, buyer.ID, "POST", "/api/orders/quote", gin.H{"product_id": p.ID, "livestream_id": liveID, "quantity": 1, "payment_method": "cod", "delivery": deliveryFixture}, 404)
+		pushed := ws.event(t, sub, "snapshot")["data"].(map[string]interface{})
+		if pushed["products"].(map[string]interface{})["total"] != float64(0) {
+			t.Fatal("archived product stayed visible in live")
+		}
+		call(t, seller.ID, "GET", "/api/sales/orders/"+offlineID, nil, 200)
+		call(t, buyer.ID, "GET", "/api/orders/"+liveOrder, nil, 200)
+		call(t, buyer.ID, "POST", "/api/orders/"+offlineID+"/cancel", nil, 200)
+		ws.command(t, "live.end", gin.H{"livestream_id": liveID}, 200)
+		call(t, seller.ID, "POST", "/api/sales/orders/"+liveOrder+"/refund", gin.H{"refund_reason": "Archived product refund"}, 200)
+		ws.command(t, "live.end", gin.H{"livestream_id": liveID}, 200)
+		db.Unscoped().First(&archived, "id = ?", p.ID)
+		if archived.StockQuantity != 10 {
+			t.Fatalf("archived stock restored incorrectly: %d", archived.StockQuantity)
+		}
+	})
+
+	t.Run("live signal leases follow actual publisher media and logout pushes ended state", func(t *testing.T) {
+		var mu sync.Mutex
+		participant := gin.H{"identity": "seller-" + seller.ID, "state": "ACTIVE", "tracks": []gin.H{{"source": "CAMERA", "muted": true}}}
+		present := true
+		media := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var input map[string]string
+			json.NewDecoder(r.Body).Decode(&input)
+			token, err := jwt.Parse(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), func(*jwt.Token) (interface{}, error) { return []byte("lifecycle-test-secret"), nil })
+			if err != nil || !token.Valid {
+				t.Error("invalid control token")
+				w.WriteHeader(401)
+				return
+			}
+			grant := token.Claims.(jwt.MapClaims)["video"].(map[string]interface{})
+			w.Header().Set("Content-Type", "application/json")
+			if strings.HasSuffix(r.URL.Path, "ListParticipants") {
+				if grant["roomAdmin"] != true || grant["room"] != input["room"] {
+					t.Error("invalid room admin grant")
+				}
+				mu.Lock()
+				defer mu.Unlock()
+				participants := []gin.H{}
+				if present {
+					participants = append(participants, participant)
+				}
+				json.NewEncoder(w).Encode(gin.H{"participants": participants})
+				return
+			}
+			if !strings.HasSuffix(r.URL.Path, "DeleteRoom") {
+				t.Error("unexpected livekit mutation", r.URL.Path)
+			}
+			io.WriteString(w, "{}")
+		}))
+		defer media.Close()
+		t.Setenv("LIVEKIT_URL", "wss://fixture.invalid")
+		t.Setenv("LIVEKIT_API_URL", media.URL)
+		t.Setenv("LIVEKIT_API_KEY", "fixture-key")
+		t.Setenv("LIVEKIT_API_SECRET", "lifecycle-test-secret")
+		ws := dialRealtime(t, server.URL, tokens[seller.ID])
+		guest := dialRealtime(t, server.URL, "")
+		title := "Lifecycle " + uuid.NewString()
+		feed := guest.subscribe(t, "lives.subscribe", gin.H{"q": title, "status": "start"})
+		guest.event(t, feed, "snapshot")
+		liveID := ws.command(t, "live.create", gin.H{"title": title}, 200)["id"].(string)
+		snapshot := guest.event(t, feed, "snapshot")["data"].(map[string]interface{})
+		if snapshot["total"] != float64(1) {
+			t.Fatal("creation was not pushed to guest feed")
+		}
+		p := product(t, seller.ID, 8)
+		ws.command(t, "live.products.add", gin.H{"livestream_id": liveID, "product_id": p.ID, "discount_price": 80, "stock_quantity": 5}, 200)
+		// Ignore unrelated active fixtures from preceding subtests.
+		db.Model(&models.Livestream{}).Where("id <> ? AND status = ?", liveID, "start").Update("signal_expires_at", time.Now().Add(time.Hour))
+		now := time.Now().Truncate(time.Second)
+		db.Model(&models.Livestream{}).Where("id = ?", liveID).Update("signal_expires_at", now.Add(-time.Second))
+		if err := services.ReconcileLivestreams(context.Background(), now); err != nil {
+			t.Fatal(err)
+		}
+		var live models.Livestream
+		db.First(&live, "id = ?", liveID)
+		if live.Status != "start" || live.LastSignalAt == nil || live.SignalExpiresAt.Sub(now) != 90*time.Second {
+			t.Fatal("muted but published camera was not kept alive", live)
+		}
+		mu.Lock()
+		present = false
+		mu.Unlock()
+		if err := services.ReconcileLivestreams(context.Background(), now.Add(89*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		db.First(&live, "id = ?", liveID)
+		if live.Status != "start" {
+			t.Fatal("ended before grace period")
+		}
+		if err := services.ReconcileLivestreams(context.Background(), now.Add(91*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		db.First(&live, "id = ?", liveID)
+		if live.Status != "end" || live.EndedAt == nil || stock(t, p.ID) != 8 {
+			t.Fatal("lost signal did not end live and restore stock")
+		}
+		endedAt := *live.EndedAt
+		ws.command(t, "live.end", gin.H{"livestream_id": liveID}, 200)
+		db.First(&live, "id = ?", liveID)
+		if !endedAt.Equal(*live.EndedAt) || stock(t, p.ID) != 8 {
+			t.Fatal("repeated end changed ended_at or stock")
+		}
+		// A chat session and an ACTIVE viewer cannot keep a stale publisher up.
+		mu.Lock()
+		present = true
+		participant["identity"] = "viewer-" + buyer.ID
+		mu.Unlock()
+		second := ws.command(t, "live.create", gin.H{"title": title + " viewer"}, 200)["id"].(string)
+		db.Model(&models.Livestream{}).Where("id = ?", second).Update("signal_expires_at", now.Add(-time.Second))
+		if err := services.ReconcileLivestreams(context.Background(), now); err != nil {
+			t.Fatal(err)
+		}
+		detail := ws.command(t, "live.get", gin.H{"livestream_id": second}, 200)
+		if detail["status"] != "end" {
+			t.Fatal("viewer kept a ghost live active")
+		}
+
+		legacy := models.Livestream{ID: uuid.NewString(), SellerID: seller.ID, Title: "Legacy unstarted", Status: "start", StartedAt: now.Add(-time.Hour)}
+		if err := db.Create(&legacy).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := services.ReconcileLivestreams(context.Background(), now); err != nil {
+			t.Fatal(err)
+		}
+		db.First(&legacy, "id = ?", legacy.ID)
+		firstDeadline := *legacy.SignalExpiresAt
+		// A second process cycle receives no memory state from the first one.
+		if err := services.ReconcileLivestreams(context.Background(), now.Add(60*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		db.First(&legacy, "id = ?", legacy.ID)
+		if !legacy.SignalExpiresAt.Equal(firstDeadline) || legacy.Status != "start" {
+			t.Fatal("restart reset legacy grace or ended too soon")
+		}
+		if err := services.ReconcileLivestreams(context.Background(), now.Add(91*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		db.First(&legacy, "id = ?", legacy.ID)
+		if legacy.Status != "end" {
+			t.Fatal("a live that never broadcast remained active")
+		}
+		third := ws.command(t, "live.create", gin.H{"title": title + " logout"}, 200)["id"].(string)
+		liveSub := guest.subscribe(t, "live.subscribe", gin.H{"livestream_id": third})
+		guest.event(t, liveSub, "snapshot")
+		ws.command(t, "live.logout", gin.H{}, 200)
+		updated := guest.event(t, liveSub, "snapshot")["data"].(map[string]interface{})["live"].(map[string]interface{})
+		if updated["status"] != "end" {
+			t.Fatal("logout did not push ended state")
+		}
+		guest.command(t, "live.logout", gin.H{}, 401)
+		foreign := models.Livestream{ID: uuid.NewString(), SellerID: other.ID, Title: "Other seller", Status: "start", StartedAt: time.Now()}
+		db.Create(&foreign)
+		ws.command(t, "live.logout", gin.H{}, 200)
+		db.First(&foreign, "id = ?", foreign.ID)
+		if foreign.Status != "start" {
+			t.Fatal("logout ended another seller live")
 		}
 	})
 

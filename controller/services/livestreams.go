@@ -93,7 +93,8 @@ func ListLivestreamProducts(ctx context.Context, id string, page Pagination) ([]
 	if err := config.DB.WithContext(ctx).Select("id").Take(&models.Livestream{}, "id = ?", id).Error; err != nil {
 		return nil, 0, lookupError(err, "livestream_not_found")
 	}
-	query := config.DB.WithContext(ctx).Model(&models.LivestreamProduct{}).Where("livestream_id = ?", id)
+	query := config.DB.WithContext(ctx).Model(&models.LivestreamProduct{}).Where("livestream_id = ? AND status <> ?", id, removedLivestreamProduct).
+		Where("EXISTS (?)", config.DB.WithContext(ctx).Model(&models.Product{}).Select("1").Where("products.id = livestream_products.product_id"))
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -108,7 +109,9 @@ func ListLivestreamProducts(ctx context.Context, id string, page Pagination) ([]
 func CreateLivestream(ctx context.Context, userID, title string) (*models.Livestream, error) {
 	live := &models.Livestream{ID: uuid.NewString(), SellerID: userID, Title: title, Status: "start"}
 	// CreatedAt is not the live start time in the legacy schema.
-	live.StartedAt = time.Now().UTC()
+	live.StartedAt = time.Now()
+	deadline := live.StartedAt.Add(LiveSignalGrace)
+	live.SignalExpiresAt = &deadline
 	if err := config.DB.WithContext(ctx).Create(live).Error; err != nil {
 		return nil, err
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -147,4 +148,59 @@ func EndLivestreamAndMedia(userID, liveID string) (*models.Livestream, bool, err
 		return live, false, nil
 	}
 	return live, true, nil
+}
+
+// ListParticipants is a read-only media control request. Viewer presence and
+// local UI heartbeats never count as evidence that the seller is broadcasting.
+func livePublisherPresent(ctx context.Context, liveID, sellerID string) (bool, error) {
+	settings, err := liveKitConfig()
+	if err != nil {
+		return false, err
+	}
+	token, err := settings.sign("", jwt.MapClaims{"roomAdmin": true, "room": liveKitRoom(liveID)})
+	if err != nil {
+		return false, err
+	}
+	body, _ := json.Marshal(map[string]string{"room": liveKitRoom(liveID)})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, settings.apiURL+"/twirp/livekit.RoomService/ListParticipants", bytes.NewReader(body))
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	response, err := liveKitHTTP.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	if response.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("livekit ListParticipants returned HTTP %d", response.StatusCode)
+	}
+	var result struct {
+		Participants []struct {
+			Identity string          `json:"identity"`
+			State    json.RawMessage `json:"state"`
+			Tracks   []struct {
+				Source json.RawMessage `json:"source"`
+			} `json:"tracks"`
+		} `json:"participants"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&result); err != nil {
+		return false, err
+	}
+	for _, p := range result.Participants {
+		if p.Identity != "seller-"+sellerID || (string(p.State) != `"ACTIVE"` && string(p.State) != "2") {
+			continue
+		}
+		for _, track := range p.Tracks {
+			switch string(track.Source) {
+			case `"CAMERA"`, `"MICROPHONE"`, "1", "2":
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }

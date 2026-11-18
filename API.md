@@ -35,9 +35,10 @@ nếu dịch vụ email chưa cấu hình hoặc gửi thất bại.
 | GET | `/api/products` | Danh sách, phân trang và tìm kiếm | Không |
 | GET | `/api/products/:product_id` | Chi tiết sản phẩm | Không |
 | POST | `/api/products` | Tạo sản phẩm | Có |
+| POST | `/api/products/images` | Upload ảnh, multipart `file` | Có |
 | PATCH | `/api/products/:product_id` | Sửa thông tin sản phẩm | Có |
 | POST | `/api/products/:product_id/stock` | Điều chỉnh kho gốc | Có |
-| DELETE | `/api/products/:product_id` | Xóa sản phẩm chưa được sử dụng | Có |
+| DELETE | `/api/products/:product_id` | Xóa mềm sản phẩm | Có |
 
 Tạo sản phẩm:
 
@@ -89,9 +90,9 @@ không ghi đè nhau. `stock_quantity` chỉ là kho gốc còn tự do, không 
 đã chuyển sang live hay đã giữ cho đơn hàng.
 
 Chỉ chủ sản phẩm được sửa, điều chỉnh kho hoặc xóa (người khác nhận 403).
-Xóa thành công trả 204; sản phẩm đang gắn trong live hoặc đã được tham chiếu
-bởi bất kỳ OrderItem nào trả `409 product_in_use`, kể cả đơn đã hủy/hoàn, để
-giữ lịch sử. Không tự xóa dây chuyền các đơn/live. Sửa giá/thông tin sản phẩm
+Xóa mềm thành công trả 204 và ghi `products.deleted_at`. Sản phẩm bị ẩn khỏi
+catalog/live, GET và đặt mua mới trả 404. Không xóa dây chuyền đơn/live hay
+ảnh lịch sử. Đơn cũ vẫn đọc/hủy/hoàn được; trả tồn kho vào cả sản phẩm đã ẩn. Sửa giá/thông tin sản phẩm
 gốc không thay đổi giá đã chốt trong đơn hoặc snapshot sản phẩm đã gắn vào live.
 
 ## Đơn hàng
@@ -335,3 +336,20 @@ các địa chỉ đã có; không cần tự xóa/tạo lại bảng.
 Các danh mục GHN, tra bưu cục và quote dùng lệnh `shipping.*` trên `/api/ws`.
 Không có HTTP `/api/shipping/*`. Xem [SHIPPING.md](SHIPPING.md) và REALTIME.md.
 PUT pickup/HTTP quote cũ được giữ cho client tương thích; FE dùng WS.
+
+
+## Upload ảnh sản phẩm và tạo ngay trong live
+
+`POST /api/products/images`, Bearer JWT, Body → form-data: `file` loại File.
+Ảnh JPEG/PNG/WebP tối đa 10 MB; kiểm tra MIME nội dung, tên file do server tạo.
+Response 201: `{ "url": "/uploads/products/<uuid>.png" }`. Gán url vào
+`image_url` khi tạo/sửa sản phẩm. Upload này không thay avatar. FE cho chọn
+file/preview; không yêu cầu người dùng nhập URL. Cả GET/list/create/update
+sản phẩm đều trả `parcel` để chỉnh sửa thông tin kiện mà không nhập lại.
+
+Tạo sản phẩm mới ngay trong live qua WS `live.products.create` (REALTIME.md).
+Tạo catalog và cấp kho live trong cùng transaction; lỗi không để lại sản
+phẩm tạo dở. Picker dùng GET `/api/products?exclude_livestream_id=<UUID>` để
+loại sản phẩm đã gắn. Gỡ khỏi live ghi status=removed, trả kho, giữ allocation
+cho lịch sử; thêm lại tái sử dụng allocation. Đơn pending/paid vẫn chặn thao
+tác gỡ cho tới khi xử lý xong. Xóa mềm catalog ẩn khỏi bán nhưng giữ các đơn.

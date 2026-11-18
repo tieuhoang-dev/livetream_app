@@ -32,6 +32,8 @@ Subscribe cần thêm subscription_id riêng. Snapshot và push dùng subscripti
 | live.get | livestream_id | Công khai; trạng thái kể cả phiên đã kết thúc |
 | live.subscribe | livestream_id, page, page_size | Công khai; live, products, shipping_origin |
 | live.create | title | JWT; chủ phiên từ người đã xác thực |
+| live.logout | {} | JWT; kết thúc tất cả phiên đang mở của chính tài khoản trước khi logout |
+| live.products.create | livestream_id, product, discount_price, stock_quantity, is_pinned | Chủ phiên; tạo catalog + cấp kho nguyên tử |
 | live.end | livestream_id | Chủ phiên; end và media_closed |
 | live.products.add | livestream_id, product_id, discount_price, stock_quantity, is_pinned | Chủ phiên/sản phẩm |
 | live.products.remove | livestream_id, product_id | Chủ phiên |
@@ -110,3 +112,39 @@ Thư viện root không chứa truy vấn SQL/Mongo hay logic GHN.
 
 Kiểm thử Go dùng MySQL/Mongo cục bộ và httptest; test FE giả lập server WS.
 GHN chỉ đọc danh mục/báo phí, chưa kiểm thử bằng tài khoản GHN thật.
+
+
+## Vòng đời live và mất tín hiệu
+
+`live.create` thực sự chạy qua WebSocket; SQL lưu trạng thái bền vững, WS
+trả kết quả và đẩy snapshot mới cho các client đăng ký `lives.subscribe` và
+`live.subscribe`. Không có HTTP API tạo live. Tạo/kết thúc/gỡ sản phẩm chỉ
+publish sau khi SQL commit; filter/phân trang được áp lại cho từng subscriber.
+
+`controller/services/live_lifecycle.go` chạy ở backend, kiểm tra LiveKit
+ListParticipants mỗi 15 giây, tối đa 4 request đồng thời. Chỉ participant
+`seller-<seller_id>` ở trạng thái ACTIVE và có track CAMERA/MICROPHONE mới gia
+hạn. Mute có chủ đích vẫn được chấp nhận; viewer/chat WS không giữ live sống.
+Phiên mới có 90 giây để bắt đầu phát. Mất publisher khoảng 90 giây (cộng tối
+đa một chu kỳ kiểm tra trong điều kiện bình thường) thì kết thúc, trả hàng
+chưa bán về kho, đóng room và đẩy lại list/phòng. LiveKit lỗi kéo dài cũng
+không duy trì phiên vô hạn. Thời gian dựa trên lần LiveKit xác nhận publisher,
+không đo trực tiếp từng gói RTP ở backend Go.
+
+Deadline/last_signal lưu trong SQL, không reset khi backend khởi động lại.
+Dòng legacy chưa có deadline nhận một lần grace rồi lưu lại. Nhiều backend
+cần bus fan-out chung như lưu ý phía trên. Worker recheck deadline dưới khóa
+SQL trước khi end; end đồng thời/thử lại không trả kho hai lần hoặc đổi ended_at.
+
+FE logout rời video ngay, gửi `live.logout` trước khi xóa token/đóng socket.
+Nếu request không tới backend, việc ngắt media vẫn dẫn tới timeout. Room API
+chỉ dùng ListParticipants/DeleteRoom; GHN vẫn chỉ danh mục và báo phí.
+
+Tạo sản phẩm trong live:
+
+```json
+{"type":"live.products.create","request_id":"new-product-1","payload":{"livestream_id":"<UUID>","product":{"name":"Áo","price":100000,"stock_quantity":10,"image_url":"/uploads/products/<file>.png","parcel":{"weight_grams":500,"length_cm":20,"width_cm":15,"height_cm":10}},"discount_price":80000,"stock_quantity":5,"is_pinned":true}}
+```
+
+Upload ảnh nhị phân dùng HTTP multipart `/api/products/images`, sau đó chỉ
+truyền URL lưu trữ trong frame. Không gửi file base64 vào WebSocket.

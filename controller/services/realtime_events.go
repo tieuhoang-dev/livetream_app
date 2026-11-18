@@ -34,7 +34,7 @@ func orderChanged(id string) {
 	payload := map[string]string{"order_id": id, "status": order.Status}
 	config.Realtime.Publish("user:"+order.UserID, "order.changed", payload)
 	var sellers []string
-	config.DB.Model(&models.Product{}).Joins("JOIN order_items ON order_items.product_id = products.id").Where("order_items.order_id = ?", id).Distinct().Pluck("products.seller_id", &sellers)
+	config.DB.Unscoped().Model(&models.Product{}).Joins("JOIN order_items ON order_items.product_id = products.id").Where("order_items.order_id = ?", id).Distinct().Pluck("products.seller_id", &sellers)
 	for _, seller := range sellers {
 		if seller != order.UserID {
 			config.Realtime.Publish("user:"+seller, "order.changed", payload)

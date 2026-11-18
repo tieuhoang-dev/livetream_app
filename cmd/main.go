@@ -56,6 +56,9 @@ func main() {
 	r.Static("/uploads", filepath.Join(".", "uploads"))
 	r.GET("/teststudio/*path", gin.WrapH(http.StripPrefix("/teststudio", teststudio.Handler())))
 	routes.SetupUserRoutes(r)
+	lifecycleCtx, cancelLifecycle := context.WithCancel(context.Background())
+	defer cancelLifecycle()
+	go services.RunLivestreamLifecycle(lifecycleCtx)
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"

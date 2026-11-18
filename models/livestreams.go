@@ -3,13 +3,15 @@ package models
 import "time"
 
 type Livestream struct {
-	ID        string     `gorm:"type:char(36);primary_key" json:"id"`
-	SellerID  string     `gorm:"type:char(36);not null;index:idx_livestreams_seller_started,priority:1" json:"seller_id"`
-	Title     string     `gorm:"size:255;not null" json:"title"`
-	Status    string     `gorm:"size:50;not null;index:idx_livestreams_status_started,priority:1" json:"status"`
-	StreamURL string     `gorm:"size:255;not null" json:"stream_url"`
-	StartedAt time.Time  `gorm:"index:idx_livestreams_status_started,priority:2;index:idx_livestreams_seller_started,priority:2" json:"started_at"`
-	EndedAt   *time.Time `json:"ended_at"`
+	ID              string     `gorm:"type:char(36);primary_key" json:"id"`
+	SellerID        string     `gorm:"type:char(36);not null;index:idx_livestreams_seller_started,priority:1" json:"seller_id"`
+	Title           string     `gorm:"size:255;not null" json:"title"`
+	Status          string     `gorm:"size:50;not null;index:idx_livestreams_status_started,priority:1" json:"status"`
+	StreamURL       string     `gorm:"size:255;not null" json:"stream_url"`
+	StartedAt       time.Time  `gorm:"index:idx_livestreams_status_started,priority:2;index:idx_livestreams_seller_started,priority:2" json:"started_at"`
+	EndedAt         *time.Time `json:"ended_at"`
+	LastSignalAt    *time.Time `json:"-"`
+	SignalExpiresAt *time.Time `gorm:"index" json:"-"`
 
 	User User `gorm:"foreignKey:SellerID;constraint:OnUpdate:CASCADE,OnDelete:SET NULL;" json:"user"`
 }

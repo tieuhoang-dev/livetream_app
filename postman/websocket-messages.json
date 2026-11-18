@@ -212,6 +212,41 @@
           "temp_id": "postman-1"
         }
       }
+    },
+    {
+      "case": "WS-020",
+      "tab": "seller",
+      "payload": {
+        "type": "live.logout",
+        "request_id": "logout-seller",
+        "payload": {}
+      }
+    },
+    {
+      "case": "WS-021",
+      "tab": "seller",
+      "payload": {
+        "type": "live.products.create",
+        "request_id": "inline-product",
+        "payload": {
+          "livestream_id": "{{live_id}}",
+          "product": {
+            "name": "Sản phẩm mới trong live",
+            "price": 100000,
+            "stock_quantity": 10,
+            "image_url": "{{product_image_url}}",
+            "parcel": {
+              "weight_grams": 500,
+              "length_cm": 20,
+              "width_cm": 15,
+              "height_cm": 10
+            }
+          },
+          "discount_price": 80000,
+          "stock_quantity": 5,
+          "is_pinned": true
+        }
+      }
     }
   ]
 }

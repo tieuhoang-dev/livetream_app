@@ -98,6 +98,27 @@ func registerLives(hub *realtime.Service) {
 		}
 		return gin.H{"id": live.ID, "title": live.Title, "status": live.Status, "media_closed": closed}, nil
 	})
+	register(hub, "live.logout", true, func(ctx context.Context, c *realtime.Client, req realtime.Request) (any, error) {
+		ids, closed, err := services.EndOwnedLivestreams(c.Identity().ID)
+		return gin.H{"ended": ids, "media_closed": closed}, err
+	})
+	register(hub, "live.products.create", true, func(ctx context.Context, c *realtime.Client, req realtime.Request) (any, error) {
+		var input struct {
+			ID            string                      `json:"livestream_id" binding:"required,uuid"`
+			Product       services.CreateProductInput `json:"product"`
+			DiscountPrice *float64                    `json:"discount_price" binding:"required,gte=0"`
+			Stock         int                         `json:"stock_quantity" binding:"required,gt=0"`
+			Pinned        bool                        `json:"is_pinned"`
+		}
+		if err := decode(req, &input); err != nil {
+			return nil, err
+		}
+		product, err := services.CreateLivestreamProduct(ctx, c.Identity().ID, input.ID, input.Product, *input.DiscountPrice, input.Stock, input.Pinned)
+		if err != nil {
+			return nil, err
+		}
+		return gin.H{"product_id": product.ID, "added": true}, nil
+	})
 	register(hub, "live.media", true, func(ctx context.Context, c *realtime.Client, req realtime.Request) (any, error) {
 		var input struct {
 			ID   string `json:"livestream_id" binding:"required,uuid"`

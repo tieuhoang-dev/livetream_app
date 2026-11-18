@@ -7,6 +7,7 @@ import (
 
 	"livesteam_app/controller/services"
 	"livesteam_app/models"
+	"livesteam_app/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -33,6 +34,7 @@ func productJSON(product models.Product) gin.H {
 		"price": product.Price, "image_url": product.ImageURL,
 		"stock_quantity": product.StockQuantity, "description": product.Description,
 		"created_at": product.CreatedAt,
+		"parcel":     product.Parcel,
 	}
 }
 
@@ -129,4 +131,16 @@ func DeleteProduct(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+func UploadProductImage(c *gin.Context) {
+	if _, ok := currentUserID(c); !ok {
+		return
+	}
+	url, err := utils.UploadImage(c, "file", "products")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"url": url})
 }
