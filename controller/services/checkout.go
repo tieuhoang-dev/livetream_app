@@ -126,6 +126,7 @@ func normalizeCheckoutInput(input OrderInput, completeDelivery bool) (OrderInput
 	input.PaymentMethod = strings.TrimSpace(input.PaymentMethod)
 	// Stations are seller drop-off origins, never buyer destinations.
 	input.Delivery.StationID, input.Delivery.StationName = 0, ""
+	input.Delivery.UseNearestStation = false
 	if !completeDelivery && input.PaymentMethod == "" {
 		input.PaymentMethod = "cod"
 	}
@@ -286,5 +287,6 @@ func SaveShippingSettings(ctx context.Context, sellerID string, row models.Shipp
 	if err := config.DB.WithContext(ctx).Save(&row).Error; err != nil {
 		return nil, err
 	}
+	sellerShippingChanged(sellerID)
 	return &row, nil
 }

@@ -8,8 +8,6 @@ AUTH-006,01 - Setup tai khoan (THU CONG),Login buyer,POST,{{base_url}}/api/users
 SHIP-001,01b - Giao hàng (tài khoản test),Cấu hình nơi lấy hàng cho báo phí GHN,PUT,{{base_url}}/api/sales/shipping-settings,Seller JWT,Đã đăng nhập seller test,"{   ""pickup_address"": {     ""name"": ""Postman Test Shop"",     ""phone"": ""0901234567"",     ""province_code"": ""1"",     ""ward"": ""Phường thử nghiệm"",     ""address_line"": ""34 Đường shop"",     ""latitude"": null,     ""longitude"": null,     ""carrier_province_id"": {{ghn_pickup_province_id}},     ""carrier_district_id"": {{ghn_pickup_district_id}},     ""carrier_ward_code"": ""{{ghn_pickup_ward_code}}""   } }",200,,Cần GHN staging và mã khu vực hợp lệ; không đặt phí thủ công.,Tự động
 AUTO-001,02 - HTTP tu dong,Login seller,POST,{{base_url}}/api/users/login,Không JWT,"seller_email, seller_password",{{auth_body}},200,,,Tự động
 AUTO-002,02 - HTTP tu dong,Login buyer,POST,{{base_url}}/api/users/login,Không JWT,"buyer_email, buyer_password",{{auth_body}},200,,,Tự động
-AUTO-003,02 - HTTP tu dong,WebSocket thiếu JWT,GET,{{base_url}}/api/auth/ws,Không JWT,,,401,Authorization token missing,,Tự động
-AUTO-004,02 - HTTP tu dong,WebSocket JWT sai,GET,{{base_url}}/api/auth/ws,invalid,,,401,Invalid token,,Tự động
 AUTO-005,02 - HTTP tu dong,Thiếu JWT: POST /api/products,POST,{{base_url}}/api/products,Không JWT,,{},401,Authorization token missing,,Tự động
 AUTO-006,02 - HTTP tu dong,Thiếu JWT: PATCH /api/products/{{missing_id}},PATCH,{{base_url}}/api/products/{{missing_id}},Không JWT,,{},401,Authorization token missing,,Tự động
 AUTO-007,02 - HTTP tu dong,Thiếu JWT: DELETE /api/products/{{missing_id}},DELETE,{{base_url}}/api/products/{{missing_id}},Không JWT,,,401,Authorization token missing,,Tự động

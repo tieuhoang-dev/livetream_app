@@ -95,6 +95,7 @@ func OrderProduct(ctx context.Context, userID string, raw OrderInput) (*models.O
 		}
 		return nil, err
 	}
+	orderChanged(order.ID)
 	return &order, nil
 }
 
@@ -118,7 +119,7 @@ func AddProductToLivestream(userID, livestreamID, productID string, discountPric
 	if discountPrice < 0 {
 		return errors.New("invalid_price")
 	}
-	return config.DB.Transaction(func(tx *gorm.DB) error {
+	return transactLive(livestreamID, func(tx *gorm.DB) error {
 		live, err := ownedLivestream(tx, userID, livestreamID)
 		if err != nil {
 			return err
@@ -194,6 +195,8 @@ func EndLivestream(userID, livestreamID string) (*models.Livestream, error) {
 	if err != nil {
 		return nil, err
 	}
+	liveChanged(live.ID)
+	shippingChanged(live.ID)
 	return live, nil
 }
 
@@ -213,7 +216,7 @@ func restoreCatalogStock(tx *gorm.DB, productID string, quantity int) error {
 }
 
 func RemoveProductFromLivestream(userID, livestreamID, productID string) error {
-	return config.DB.Transaction(func(tx *gorm.DB) error {
+	return transactLive(livestreamID, func(tx *gorm.DB) error {
 		if _, err := ownedLivestream(tx, userID, livestreamID); err != nil {
 			return err
 		}
@@ -266,7 +269,7 @@ func lockSellerOrder(tx *gorm.DB, sellerID, orderID string) (*models.Order, erro
 }
 
 func CancelOrder(buyerID, orderID string) error {
-	return config.DB.Transaction(func(tx *gorm.DB) error {
+	return transactOrder(orderID, func(tx *gorm.DB) error {
 		order, err := lockOrder(buyerOrders(tx, buyerID), orderID)
 		if err != nil {
 			return err
@@ -284,7 +287,7 @@ func RefundOrder(sellerID, orderID, refundReason string) error {
 	if refundReason == "" {
 		return errors.New("invalid_refund_reason")
 	}
-	return config.DB.Transaction(func(tx *gorm.DB) error {
+	return transactOrder(orderID, func(tx *gorm.DB) error {
 		order, err := lockSellerOrder(tx, sellerID, orderID)
 		if err != nil {
 			return err
@@ -346,7 +349,7 @@ func restoreOrderItemStock(tx *gorm.DB, livestreamID *string, item models.OrderI
 
 // This records the internal payment status; it does not charge a payment gateway.
 func PayOrder(sellerID, orderID, paymentMethod string) error {
-	return config.DB.Transaction(func(tx *gorm.DB) error {
+	return transactOrder(orderID, func(tx *gorm.DB) error {
 		order, err := lockSellerOrder(tx, sellerID, orderID)
 		if err != nil {
 			return err

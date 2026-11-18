@@ -41,10 +41,10 @@ export class ScriptSandbox {
 }
 
 export class TestRunner {
-  constructor(collection, {onEvent = () => {}, requestInput, workerFactory, fetchImpl = fetch, assetBase = new URL('./data/', import.meta.url)} = {}) {
+  constructor(collection, {onEvent = () => {}, requestInput, workerFactory, webSocketFactory = url => new WebSocket(url), fetchImpl = fetch, assetBase = new URL('./data/', import.meta.url)} = {}) {
     this.collection = collection; this.all = flattenCollection(collection); this.onEvent = onEvent;
     // Browser fetch requires its Window/Worker receiver, never this TestRunner.
-    this.requestInput = requestInput; this.workerFactory = workerFactory; this.fetchImpl = fetchImpl.bind(globalThis); this.assetBase = assetBase;
+    this.webSocketFactory = webSocketFactory; this.wsCounter = 0; this.requestInput = requestInput; this.workerFactory = workerFactory; this.fetchImpl = fetchImpl.bind(globalThis); this.assetBase = assetBase;
     this.results = []; this.cursor = 0; this.status = 'idle'; this.env = {}; this.files = new Map(); this.sockets = new Map();
   }
   emit(type, extra = {}) { this.onEvent({type, cursor: this.cursor, status: this.status, results: this.results, plan: this.plan || [], ...extra}); }
@@ -59,7 +59,7 @@ export class TestRunner {
     this.status = 'running'; this.emit('running'); return answer;
   }
   pause() { this.pauseRequested = true; }
-  stop() { this.stopped = true; this.abortController?.abort(); this.emit('stop-requested'); }
+  stop() { this.stopped = true; this.abortController?.abort(); for (const socket of this.sockets.values()) socket.close(); this.emit('stop-requested'); }
   async start(config, folders) {
     if (this.status !== 'idle') throw new Error('Phiên này đã được bắt đầu');
     this.env = {...config}; this.env.base_url = normalizeBackendUrl(config.base_url);
@@ -146,21 +146,21 @@ export class TestRunner {
     if (step.folder.startsWith('04 -') && !this.env.live_id) {
       await this.ensureToken('seller'); await this.ensureToken('buyer');
       this.emit('system', {message: 'Tạo phiên live qua WebSocket…'});
-      const reply = await this.wsRequest('seller', {type: 'create_live', content: 'Test Studio live'}, 'create_live_success');
+      const reply = await this.wsRequest('seller', {type: 'live.create', payload: {title: 'Test Studio live'}});
       this.env.live_id = reply.id; this.liveOwned = true;
     }
     if (step.folder.startsWith('05 -') && !this.env.ended_live_id) {
       if (this.env.live_id && this.liveOwned) {
-        this.emit('system', {message: 'Kết thúc live và kiểm tra chặn tham gia lại…'});
-        await this.wsRequest('seller', {type: 'end_live', content: this.env.live_id}, 'end_live_success');
+        this.emit('system', {message: 'Kết thúc live và xác nhận trạng thái…'});
+        await this.wsRequest('seller', {type: 'live.end', payload: {livestream_id: this.env.live_id}});
         this.env.ended_live_id = this.env.live_id;
-        await this.wsRequest('buyer', {type: 'join_live', content: this.env.live_id}, 'join_live_error');
+        await this.assertEnded(this.env.live_id);
       } else {
         this.emit('system', {message: 'Chuẩn bị live đã kết thúc qua WebSocket…'});
-        const reply = await this.wsRequest('seller', {type: 'create_live', content: 'Test Studio ended live'}, 'create_live_success');
-        await this.wsRequest('seller', {type: 'end_live', content: reply.id}, 'end_live_success');
+        const reply = await this.wsRequest('seller', {type: 'live.create', payload: {title: 'Test Studio ended live'}});
+        await this.wsRequest('seller', {type: 'live.end', payload: {livestream_id: reply.id}});
         this.env.ended_live_id = reply.id;
-        await this.wsRequest('buyer', {type: 'join_live', content: reply.id}, 'join_live_error');
+        await this.assertEnded(reply.id);
       }
     }
     if (step.folder.startsWith('05 -') && !this.env.live_product_id) {
@@ -203,27 +203,42 @@ export class TestRunner {
       }
     }
   }
-  async wsRequest(actor, payload, expected) {
+  async assertEnded(id) {
+    const reply = await this.wsRequest('buyer', {type: 'live.get', payload: {livestream_id: id}});
+    if (reply.status !== 'end') throw new Error('Phiên chưa kết thúc');
+  }
+  async wsRequest(actor, payload) {
+    if (this.stopped) throw new Error('Đã dừng');
     await this.ensureToken(actor);
     let socket = this.sockets.get(actor);
     if (!socket || socket.readyState !== 1) {
-      const url = this.backendUrl.replace(/^http/, 'ws') + '/api/auth/ws?token=' + encodeURIComponent(this.env[actor + '_token']);
-      socket = new WebSocket(url); this.sockets.set(actor, socket);
+      socket = this.webSocketFactory(this.backendUrl.replace(/^http/, 'ws') + '/api/ws'); this.sockets.set(actor, socket);
       await new Promise((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('Không mở được WebSocket')), 10000);
-        socket.addEventListener('open', () => { clearTimeout(timer); resolve(); }, {once: true});
-        socket.addEventListener('error', () => { clearTimeout(timer); reject(new Error('Kết nối WebSocket thất bại')); }, {once: true});
+        const cleanup = () => { clearTimeout(timer); socket.removeEventListener('open', opened); socket.removeEventListener('error', failed); socket.removeEventListener('close', failed); };
+        const opened = () => { cleanup(); resolve(); };
+        const failed = () => { cleanup(); reject(new Error(this.stopped ? 'Đã dừng' : 'Không mở được WebSocket')); };
+        const timer = setTimeout(failed, 10000);
+        socket.addEventListener('open', opened); socket.addEventListener('error', failed); socket.addEventListener('close', failed);
       });
+      try { await this.wsExchange(socket, {type: 'authenticate', payload: {token: this.env[actor + '_token']}}); }
+      catch (error) { socket.close(); this.sockets.delete(actor); throw error; }
     }
+    return this.wsExchange(socket, payload);
+  }
+  wsExchange(socket, payload) {
+    if (this.stopped) return Promise.reject(new Error('Đã dừng'));
+    const id = 'studio-' + ++this.wsCounter;
     return new Promise((resolve, reject) => {
-      const cleanup = () => { clearTimeout(timer); socket.removeEventListener('message', listener); };
+      const cleanup = () => { clearTimeout(timer); socket.removeEventListener('message', listener); socket.removeEventListener('close', closed); };
+      const closed = () => { cleanup(); reject(new Error(this.stopped ? 'Đã dừng' : 'Mất kết nối WebSocket; kiểm tra trạng thái thao tác trước khi thử lại')); };
       const listener = event => {
         let body; try { body = JSON.parse(event.data); } catch { return; }
-        if (body.type === expected) { cleanup(); resolve(body); }
-        else if (body.type?.endsWith('_error')) { cleanup(); reject(new Error(body.error || body.type)); }
+        if (body.type !== 'result' || body.request_id !== id) return;
+        cleanup(); if (body.error) reject(new Error(body.error)); else resolve(body.data);
       };
-      const timer = setTimeout(() => { cleanup(); reject(new Error('WebSocket không trả kết quả đúng hạn')); }, 10000);
-      socket.addEventListener('message', listener); socket.send(JSON.stringify(payload));
+      const timer = setTimeout(() => { cleanup(); reject(new Error('WebSocket không trả kết quả đúng hạn; không tự gửi lại thao tác')); }, 22000);
+      socket.addEventListener('message', listener); socket.addEventListener('close', closed);
+      socket.send(JSON.stringify({...payload, request_id: id}));
     });
   }
   async execute(step) {

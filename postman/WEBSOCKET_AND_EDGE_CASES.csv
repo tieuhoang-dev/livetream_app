@@ -1,28 +1,26 @@
 ﻿id,dieu_kien,thao_tac,ket_qua_mong_doi
-WS-001,"Tab mới, không JWT",Connect `{{ws_url}}/api/auth/ws`,"Handshake bị từ chối, HTTP 401"
-WS-002,"Tab mới, JWT sai",Connect `...?token=invalid-token`,"HTTP 401, không upgrade"
-WS-003,Seller đã connect,"`{""type"":""create_live"",""content"":""Postman live""}`","`create_live_success`, có UUID `id`, đúng `seller_id`, `status: ""start""`; copy `id` vào `live_id`"
-WS-004,"Buyer, live đang start","`{""type"":""join_live"",""content"":""{{live_id}}""}`","`join_live_success`, đúng ID"
-WS-005,Buyer không phải chủ live,"`{""type"":""end_live"",""content"":""{{live_id}}""}`",`end_live_error`; live vẫn tham gia được
-WS-006,"Buyer, UUID không tồn tại","`{""type"":""join_live"",""content"":""{{missing_id}}""}`",`join_live_error`
-WS-007,Seller và buyer cùng online,Text message bên dưới,"Seller nhận ACK, buyer nhận cùng `id`, nội dung đúng, `status: ""queued""`"
-WS-008,Seller,Gửi message có `sender_id` giả là buyer,`from` vẫn là `seller_id` lấy từ JWT
-WS-009,Seller,Text không có `receiver_id`,`message_error`; có thể tiếp tục gửi tin hợp lệ trên cùng socket
-WS-010,Seller → buyer,"Lần lượt đổi type thành `message`, `text`, `image`, `video`, `voice`, `file`","Type được giữ đúng; hai tab nhận cùng ID, tempId và content"
-WS-011,"Seller, sau folder HTTP 04","`{""type"":""end_live"",""content"":""{{live_id}}""}`",`end_live_success`; copy ID vào `ended_live_id`
-WS-012,"Buyer, sau WS-011","`{""type"":""join_live"",""content"":""{{ended_live_id}}""}`","**`join_live_error`**, không phải success; đây là regression của lỗi join live đã kết thúc"
-WS-013,"Giữ tab seller cũ, mở tab seller mới cùng JWT","Connect tab mới, sau đó buyer gửi tin đến seller","Tab seller cũ bị đóng; tab seller mới nhận tin, không bị cleanup của tab cũ xóa mất"
-WS-014,"Buyer disconnect, seller còn online",Seller gửi tin đến `buyer_id`,Seller nhận ACK queued; chưa thể kết luận buyer đã đọc/nhận hoặc Mongo đã lưu chỉ từ ACK
-WS-015,Tab test riêng,Gửi payload JSON với content > 1 MiB,"Server đóng kết nối do giới hạn read, thường close code 1009; kết nối mới vẫn mở được"
-WS-016,Tab WebSocket công khai không JWT,Connect /api/livestreams/ws; gửi list_lives với query page=1/page_size=12,"list_lives_success, cùng request_id; data/total/page/page_size"
-WS-017,Đã đăng ký list_lives,Tạo/kết thúc live ở tab seller; thử HTTP end,Snapshot tự cập nhật; socket chat không bị thay
-WS-018,Cùng socket công khai,Đổi query status/q/seller_id/product_id/sort/page; thử UUID sai hoặc page_size=101,Subscription mới đúng bộ lọc; invalid_query cho bộ lọc sai
-WS-019,Tab công khai,Ngắt/mở lại và gửi subscription; thử create_live trên public socket,Nhận snapshot mới; lệnh tạo live bị từ chối
+WS-001,guest,"{""type"": ""live.create"", ""request_id"": ""ws-001"", ""payload"": {""title"": ""Không được tạo""}}",Xem WEBSOCKET_TEST_CASES.md
+WS-002,guest,"{""type"": ""authenticate"", ""request_id"": ""ws-002"", ""payload"": {""token"": ""invalid-token""}}",Xem WEBSOCKET_TEST_CASES.md
+WS-003,seller,"{""type"": ""authenticate"", ""request_id"": ""ws-003"", ""payload"": {""token"": ""{{seller_token}}""}}",Xem WEBSOCKET_TEST_CASES.md
+WS-003-buyer,buyer,"{""type"": ""authenticate"", ""request_id"": ""ws-003-buyer"", ""payload"": {""token"": ""{{buyer_token}}""}}",Xem WEBSOCKET_TEST_CASES.md
+WS-004,guest,"{""type"": ""lives.subscribe"", ""request_id"": ""ws-004"", ""payload"": {""status"": ""start"", ""page"": 1, ""page_size"": 12}, ""subscription_id"": ""catalog""}",Xem WEBSOCKET_TEST_CASES.md
+WS-005,seller,"{""type"": ""live.create"", ""request_id"": ""ws-005"", ""payload"": {""title"": ""Postman live""}}",Xem WEBSOCKET_TEST_CASES.md
+WS-006,buyer,"{""type"": ""live.subscribe"", ""request_id"": ""ws-006"", ""payload"": {""livestream_id"": ""{{live_id}}"", ""page"": 1, ""page_size"": 12}, ""subscription_id"": ""room""}",Xem WEBSOCKET_TEST_CASES.md
+WS-007,buyer,"{""type"": ""comments.subscribe"", ""request_id"": ""ws-007"", ""payload"": {""livestream_id"": ""{{live_id}}"", ""after"": ""0""}, ""subscription_id"": ""comments""}",Xem WEBSOCKET_TEST_CASES.md
+WS-008,buyer,"{""type"": ""comments.send"", ""request_id"": ""ws-008"", ""payload"": {""livestream_id"": ""{{live_id}}"", ""content"": ""Còn hàng không?"", ""sender_id"": ""{{seller_id}}""}}",Xem WEBSOCKET_TEST_CASES.md
+WS-009,buyer,"{""type"": ""live.end"", ""request_id"": ""ws-009"", ""payload"": {""livestream_id"": ""{{live_id}}""}}",Xem WEBSOCKET_TEST_CASES.md
+WS-010,seller,"{""type"": ""live.end"", ""request_id"": ""ws-010"", ""payload"": {""livestream_id"": ""{{live_id}}""}}",Xem WEBSOCKET_TEST_CASES.md
+WS-011,buyer,"{""type"": ""live.get"", ""request_id"": ""ws-011"", ""payload"": {""livestream_id"": ""{{live_id}}""}}",Xem WEBSOCKET_TEST_CASES.md
+WS-013,seller,"{""type"": ""shipping.stations.nearby"", ""request_id"": ""ws-013"", ""payload"": {""latitude"": 21.028511, ""longitude"": 105.804817, ""carrier_province_id"": 0, ""carrier_district_id"": 0}}",Xem WEBSOCKET_TEST_CASES.md
+WS-014,seller,"{""type"": ""shipping.pickup.save"", ""request_id"": ""ws-014"", ""payload"": {""livestream_id"": ""{{live_id}}"", ""pickup_address"": {""name"": ""Shop test"", ""phone"": ""0901234567"", ""carrier_province_id"": 0, ""carrier_district_id"": 0, ""latitude"": 21.028511, ""longitude"": 105.804817, ""use_nearest_station"": true}}}",Xem WEBSOCKET_TEST_CASES.md
+WS-015,buyer,"{""type"": ""orders.subscribe"", ""request_id"": ""ws-015"", ""payload"": {}, ""subscription_id"": ""orders""}",Xem WEBSOCKET_TEST_CASES.md
+WS-018-sub,buyer,"{""type"": ""chat.subscribe"", ""request_id"": ""ws-018-sub"", ""payload"": {}, ""subscription_id"": ""messages""}",Xem WEBSOCKET_TEST_CASES.md
+WS-018-send,seller,"{""type"": ""chat.send"", ""request_id"": ""ws-018-send"", ""payload"": {""receiver_id"": ""{{buyer_id}}"", ""message_type"": ""text"", ""content"": ""Tin nhắn riêng"", ""temp_id"": ""postman-1""}}",Xem WEBSOCKET_TEST_CASES.md
 EDGE-001,User mới chưa verified; gửi `/api/users/verify` với OTP chắc chắn khác mã hiện tại,Theo điều kiện chuẩn bị,"400, `Invalid verification code`"
 EDGE-002,User mới chưa verified; chờ OTP > 15 phút rồi verify đúng mã cũ,Theo điều kiện chuẩn bị,"400, `Verification code has expired`"
 EDGE-003,Xin OTP reset; gửi `/api/users/password/reset` với mã sai khi mã thật vẫn còn hạn,Theo điều kiện chuẩn bị,"400, `invalid_otp`; password không đổi"
 EDGE-004,Xin OTP reset; chờ > 15 phút rồi xác nhận mã cũ,Theo điều kiện chuẩn bị,"400, `otp_expired`; password không đổi"
-EDGE-005,Dùng JWT đã hết hạn 12 giờ để gọi route bảo vệ/WS,Theo điều kiện chuẩn bị,HTTP 401 trước khi thao tác dữ liệu/upgrade
-EDGE-006,"Chuẩn bị tài khoản `status != active` bằng fixture DB, dùng JWT hợp lệ của user đó",Theo điều kiện chuẩn bị,HTTP 401 trên kết nối/request mới; repo chưa có API quản trị đổi status
+EDGE-005,Dùng JWT đã hết hạn 12 giờ để gọi route bảo vệ/WS,Theo điều kiện chuẩn bị,HTTP 401 với HTTP; authenticate frame trả unauthorized/401 trên WS
+EDGE-006,"Chuẩn bị tài khoản `status != active` bằng fixture DB, dùng JWT hợp lệ của user đó",Theo điều kiện chuẩn bị,HTTP 401 với HTTP; authenticate frame trả unauthorized/401 trên WS
 EDGE-007,Upload avatar file > 10 MiB bằng field `file`,Theo điều kiện chuẩn bị,400; controller hiện trả Bad Request khi MaxBytesReader từ chối
 EDGE-008,Hai buyer cùng mua hết một sản phẩm có kho 1,Theo điều kiện chuẩn bị,"Chỉ một đơn 201, đơn còn lại 409; Collection Runner chạy tuần tự không chứng minh được concurrency"

@@ -1,7 +1,7 @@
 package routes
 
 import (
-	controllers "livesteam_app/controller/controller"
+	controllers "livesteam_app/controller/http"
 	"livesteam_app/middlewares"
 
 	"github.com/gin-gonic/gin"

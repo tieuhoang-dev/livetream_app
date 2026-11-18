@@ -53,6 +53,17 @@ func TestNearbyStationsSortAndCanonicalOrigin(t *testing.T) {
 	if err != nil || address.AddressLine != good.Address || address.StationName != good.Name || address.CarrierWardCode != "001" || address.Name != "Seller" || *address.Latitude != lat {
 		t.Fatalf("unverified station origin: %+v %v", address, err)
 	}
+	if result.Selected == nil || result.Selected.ID != 1888 {
+		t.Fatal("backend did not select the nearest valid station")
+	}
+	auto := input
+	auto.UseNearestStation = true
+	auto.Latitude, auto.Longitude = &lat, &lng
+	auto.StationID = 9999
+	chosen, err := normalizePickup(context.Background(), auto)
+	if err != nil || chosen.StationID != 1888 || chosen.Name != "Seller" || chosen.UseNearestStation {
+		t.Fatalf("automatic origin was not canonical: %+v %v", chosen, err)
+	}
 	input.StationID = 1234
 	if _, err := normalizePickup(context.Background(), input); err == nil || err.Error() != "shipping_station_invalid" {
 		t.Fatalf("accepted forged station: %v", err)

@@ -2,13 +2,10 @@
 
 Base URL khi chạy local: `http://localhost:8080`.
 
-Danh sách live trên FE dùng WebSocket công khai `/api/livestreams/ws` theo
-hợp đồng bên dưới. REST danh sách được giữ để tương thích client cũ.
-
-Các route được bảo vệ nhận header `Authorization: Bearer <JWT>` từ API login.
-User phải được xác thực email và có trạng thái `active`. User ID luôn lấy từ JWT,
-không lấy từ request body. WebSocket vẫn giữ route `/api/auth/ws` và hỗ trợ
-`?token=<JWT>` như trước.
+Realtime dùng duy nhất `/api/ws`; xem [REALTIME.md](REALTIME.md) cho protocol,
+quyền và ví dụ. HTTP bên dưới dùng `Authorization: Bearer <JWT>` ở route bảo vệ.
+User phải verified/active; không tin user_id/seller_id từ request body.
+FE không polling HTTP để đọc live, sản phẩm, bình luận hay báo phí.
 
 ## Tài khoản
 
@@ -50,7 +47,8 @@ Tạo sản phẩm:
   "price": 150000,
   "stock_quantity": 20,
   "image_url": "https://example.com/ao-thun.jpg",
-  "description": "Áo cotton"
+  "description": "Áo cotton",
+  "parcel": {"weight_grams":500,"length_cm":20,"width_cm":15,"height_cm":10}
 }
 ```
 
@@ -78,7 +76,7 @@ Response danh sách: `{ "data": [...], "total": 42, "page": 1, "page_size": 20 }
 Không có kết quả trả `data: []`, `total: 0`.
 
 PATCH chỉ nhận các trường cần sửa trong `name`, `price`, `image_url`,
-`description`. Giá 0 và chuỗi rỗng cho ảnh/mô tả được lưu đúng; không cho sửa
+`description`, `parcel`. Giá 0 và chuỗi rỗng cho ảnh/mô tả được lưu đúng; không cho sửa
 owner hoặc ghi đè kho qua PATCH. Body rỗng, nhiều JSON object liên tiếp, trường
 không hỗ trợ và request JSON quá 64 KB bị từ chối với 400.
 
@@ -145,7 +143,7 @@ Các endpoint chi tiết thêm `items` với `product_id`, `name`, `image_url`,
 thanh toán chưa có. Người bán xem đơn offline qua `/api/sales/offline`.
 Người mua thực hiện các thao tác trên đơn qua `/api/orders`.
 
-Chỉ chủ đơn được thanh toán, hủy hoặc hoàn đơn. Các chuyển trạng thái:
+Người mua hủy đơn pending của mình; người bán xác nhận thanh toán/hoàn đơn của shop. Các chuyển trạng thái:
 
 - `pending → paid`: thanh toán.
 - `pending → cancelled`: hủy, trả lại tồn kho.
@@ -193,46 +191,20 @@ từ kho sản phẩm gốc sang phần kho dành riêng cho live, đồng thờ
 Xóa trả lại phần hàng chưa bán; bị chặn nếu còn đơn `pending` hoặc `paid` liên
 quan, để các đơn đó vẫn có thể hủy/hoàn đúng kho.
 
-Tạo/kết thúc live vẫn qua WebSocket với `type: "create_live"` (content là tiêu
-đề) và `type: "end_live"` (content là UUID live). Live mới lưu `ended_at = NULL`.
-`type: "join_live"` chỉ cho tham gia live có trạng thái `start`; live đã kết
-thúc hoặc không tồn tại trả `join_live_error`.
+Tạo/kết thúc live dùng `live.create`/`live.end`, theo REALTIME.md. Live mới lưu
+ended_at=NULL. `live.subscribe` đọc được snapshot của phiên đã kết thúc;
+gửi bình luận/đặt mua trên phiên đó vẫn bị chặn.
 
 Khi kết thúc live, kho chưa bán được trả về kho gốc trong cùng transaction.
-Hủy hoặc hoàn đơn sau đó trả hàng về kho gốc. Gửi lại `end_live` giữ nguyên
+Hủy hoặc hoàn đơn sau đó trả hàng về kho gốc. Gửi lại `live.end` giữ nguyên
 `ended_at` và không trả kho lần nữa. Với phiên đã kết thúc trước bản cập nhật,
-gửi lại `end_live` từ tài khoản chủ live để trả phần kho còn giữ.
+gửi lại `live.end` từ tài khoản chủ live để trả phần kho còn giữ.
 
 ## Bình luận trong live
 
-| Method | Route | Dữ liệu | JWT |
-| --- | --- | --- | --- |
-| GET | `/api/livestreams/:livestream_id/comments` | Query `after` tùy chọn | Có |
-| POST | `/api/livestreams/:livestream_id/comments` | `{"content":"Còn hàng không?"}` | Có |
-
-Bình luận được lưu theo từng phòng. Backend lấy tên người gửi từ tài khoản
-đã xác thực. Nội dung là văn bản từ 1 đến 300 ký tự sau khi bỏ khoảng trắng
-ở hai đầu. Khi phiên kết thúc, vẫn đọc được lịch sử và yêu cầu gửi mới trả `409`.
-
-Lần đọc đầu lấy tối đa 50 bình luận gần nhất theo thứ tự cũ đến mới. Response có
-`data`, `next_cursor` và `has_more`. Gửi `next_cursor` làm `after` để lấy các
-bình luận mới theo từng lượt. ID và cursor là chuỗi số. Frontend đọc phần mới
-mỗi 2,5 giây trong phiên đang mở.
-
-Bình luận được gửi và đọc **trực tiếp từ MongoDB** `livestream_app.chat_logs`,
-với `message_type: "livestream_comment"` và `livestream_id`. POST chỉ trả `201`
-sau khi MongoDB xác nhận lưu, kể cả khi chỉ gửi một tin. Mongo lỗi thì API báo
-lỗi; nội dung không được ghi sang SQL. Giới hạn 50 chỉ là kích thước trang đọc.
-
-SQL giữ tài khoản, quan hệ và trạng thái phiên live để kiểm tra quyền. Schema
-SQL mới không tạo bảng `livestream_comments`. Bộ đếm trong MongoDB
-`chat_counters` giữ ID/cursor dạng chuỗi số để FE tiếp tục dùng API hiện tại.
-
-Khi nâng cấp, dừng backend cũ trước rồi chạy bản mới: nếu bảng bình luận SQL cũ
-còn tồn tại, backend chuyển lịch sử sang MongoDB trước khi mở API. ID, tên,
-nội dung và thời gian được giữ lại; tiến độ chuyển nằm trong `chat_migrations`
-để có thể tiếp tục khi chạy lại. Bảng SQL cũ được giữ làm bản sao dữ liệu cũ,
-không được API dùng để đọc hoặc ghi bình luận sau khi chuyển xong.
+Dùng `comments.subscribe`/`comments.send` qua `/api/ws`; không có HTTP comments.
+MongoDB lưu nội dung, SQL giữ quan hệ/trạng thái live. Lịch sử/cursor, bảo vệ
+sender và reconnect được mô tả trong [REALTIME.md](REALTIME.md).
 
 ## Video qua LiveKit
 
@@ -247,7 +219,7 @@ lấy token phát camera/micro. Người xem chỉ được nhận media. Mỗi 
 identity riêng để nhiều tab có thể xem song song. Live đã kết thúc trả `409`,
 người phát sai quyền nhận `403`, cấu hình LiveKit bị thiếu trả `503`.
 
-Kết thúc phiên vẫn hỗ trợ lệnh WebSocket `end_live`. Cả hai đường đều cập nhật
+Kết thúc phiên vẫn hỗ trợ lệnh WebSocket `live.end`. Cả hai đường đều cập nhật
 trạng thái, trả kho và yêu cầu LiveKit ngắt phòng. `media_closed: false` cho
 biết phiên đã kết thúc trong Go nhưng LiveKit chưa xác nhận đóng phòng. Chủ
 phiên có thể gọi lại endpoint kết thúc. Trên bản LiveKit tự host, token cũ
@@ -311,43 +283,6 @@ contract báo giá và giới hạn chỉ lấy phí. Checkout dùng địa ch�
 khu vực GHN; chủ live không đặt phí nội tỉnh/liên tỉnh. Backend chỉ gọi danh
 mục và API fee, không tạo vận đơn hay đặt lịch lấy hàng.
 
-## Danh sách live qua WebSocket
-
-Mở `ws://localhost:8080/api/livestreams/ws` (production HTTPS dùng `wss://`).
-Đây là kênh chỉ đọc, không cần JWT và không thay kết nối chat `/api/auth/ws`.
-Gửi message sau để nhận danh sách và đăng ký cập nhật cùng bộ lọc:
-
-```json
-{
-  "type": "list_lives",
-  "request_id": "catalog-1",
-  "query": {
-    "status": "start",
-    "sort": "newest",
-    "q": "",
-    "page": 1,
-    "page_size": 12
-  }
-}
-```
-
-Response có `type: "list_lives_success"`, cùng `request_id`, và các trường
-`data`, `total`, `page`, `page_size` giống REST. Mặc định `start`, `newest`,
-trang 1, 20 dòng; `page_size` từ 1–100. `query` còn nhận `seller_id`,
-`product_id` là UUID. `status` nhận `start/end/all`, `sort` nhận `newest/oldest`.
-Bộ lọc sai trả `list_lives_error` với `error: "invalid_query"` và không thay
-subscription hợp lệ trước đó. Request mới hợp lệ thay subscription cũ.
-
-Khi tạo/kết thúc live hoặc thêm/xóa sản phẩm khỏi live thành công, server đẩy
-lại snapshot theo bộ lọc hiện tại, kể cả kết thúc qua HTTP. Client không cần
-poll danh sách. Thông báo này được fan-out trong một tiến trình backend;
-nếu triển khai nhiều instance cần nối kênh thông báo liên tiến trình.
-
-Kết nối có ping/pong và giới hạn message 16 KiB. Khi mất kết nối, FE tự mở lại
-với backoff và gửi lại bộ lọc; không chuyển sang REST. FE dùng kênh này tại
-trang khám phá, danh sách chuyển phòng và danh sách live của người bán.
-API chi tiết phiên/sản phẩm, đơn hàng và media token vẫn giữ hợp đồng riêng.
-
 ## Vị trí hiện tại và nơi lấy hàng của phiên live
 
 `DeliveryAddress` có thêm `location_mode: "manual" | "current"` (tùy chọn cho
@@ -395,17 +330,8 @@ Checkout trong live dùng nơi lấy hàng của **phiên đó** để lấy bá
 đã lưu trong đơn cũ. Migration thêm `livestream_pickups` và location_mode vào
 các địa chỉ đã có; không cần tự xóa/tạo lại bảng.
 
-### API báo phí hiện tại
+### Báo phí và bưu cục
 
-Cơ chế phí cố định do shop nhập đã được thay bằng ShippingService (GHN).
-Xem [SHIPPING.md](SHIPPING.md). GET /api/livestreams/:id/pickup không còn trả
-shipping_rates; PUT chỉ cần pickup_address. Shop không cần nhập phí để phát.
-
-### Tra bưu cục GHN quanh điểm phát
-
-`POST /api/shipping/stations/nearby` cần JWT, nhận latitude/longitude và
-carrier_province_id/carrier_district_id. Kết quả xếp theo khoảng cách đường
-chim bay trong khu vực tra cứu; chọn bưu cục rồi PUT pickup_address với
-station_id để backend xác minh địa chỉ. Phí quote dùng tuyến từ bưu cục,
-không tự tạo đơn giao hàng. Quyền GHN/captcha và giới hạn tra cứu xem
-[SHIPPING.md](SHIPPING.md#bưu-cục-gần-vị-trí-phát).
+Các danh mục GHN, tra bưu cục và quote dùng lệnh `shipping.*` trên `/api/ws`.
+Không có HTTP `/api/shipping/*`. Xem [SHIPPING.md](SHIPPING.md) và REALTIME.md.
+PUT pickup/HTTP quote cũ được giữ cho client tương thích; FE dùng WS.

@@ -67,15 +67,10 @@ phụ phí được lấy nguyên từ response, không lấy cấu hình phí c
 
 ## API ứng dụng
 
-Các API sau cần JWT người dùng, không nhận Token GHN từ client:
-
-- GET `/api/shipping/status`: provider/environment/configured/quote_only.
-- GET `/api/shipping/provinces`: các vùng GHN kèm province_code hiện tại.
-- GET `/api/shipping/districts?province_id=<GHN id>`.
-- GET `/api/shipping/wards?district_id=<GHN id>`.
-- POST `/api/orders/quote`: product_id, quantity, payment_method,
-  livestream_id nếu có, delivery gồm province_code và carrier_province_id,
-  carrier_district_id, carrier_ward_code.
+Các lệnh `shipping.*` dùng `/api/ws` và JWT frame. Không có HTTP
+`/api/shipping/*`; không nhận Token GHN từ client. Danh sách lệnh, payload và
+subscription xem [REALTIME.md](REALTIME.md). HTTP POST /api/orders/quote cũ vẫn
+được giữ cho client tương thích; FE lấy quote qua shipping.quote.
 
 Tên/điện thoại/đường chỉ bắt buộc khi tạo đơn. Backend lưu tên phường/xã chuẩn
 từ danh mục hãng vào snapshot. Phí có thể đổi theo phương thức COD, vì vậy FE
@@ -89,8 +84,10 @@ và https://developer.ghn.vn/en/docs/getting-started/overview.
 
 Người bán có thể mở **Cài đặt giao hàng** trong live (hoặc bước **Bắt đầu
 phát**), lấy GPS, rồi bấm **Tìm bưu cục GHN gần vị trí này**. Danh sách có
-khoảng cách đường chim bay, ghim trên bản đồ và liên kết chỉ đường. Không tự
-chọn bưu cục đầu tiên; người bán xác nhận bưu cục mình sẽ tự mang hàng đến.
+khoảng cách đường chim bay, ghim trên bản đồ và liên kết chỉ đường. BE tự chọn bưu cục gần nhất trong các kết quả có tọa độ và tuyến hợp lệ, trả
+trong selected. FE áp dụng lựa chọn khi bật Tự chọn bưu cục gần nhất; người
+bán kiểm tra và lưu điểm mình sẽ tự mang hàng đến gửi. Có thể tắt tự chọn để
+dùng địa chỉ lấy hàng trực tiếp hoặc chọn bưu cục khác.
 
 GHN Get Station bắt buộc quận/huyện. Reverse geocode tự điền mã khu vực nếu
 tên tỉnh/quận/phường khớp duy nhất với danh mục GHN. Thiếu tên quận hoặc dữ
@@ -99,17 +96,19 @@ quận/huyện đã chọn, không bảo đảm là bưu cục gần nhất ngo�
 đổi sang quận lân cận để tìm tiếp. Khoảng cách không phải quãng đường chạy xe
 và không được dùng làm công thức tính phí ship.
 
-API ứng dụng (cần JWT):
+Lệnh ứng dụng (JWT trên WebSocket):
 
-```http
-POST /api/shipping/stations/nearby
-Content-Type: application/json
-
-{"latitude":21.028511,"longitude":105.804817,"carrier_province_id":<GHN province ID>,"carrier_district_id":<GHN district ID>}
+```json
+{"type":"shipping.stations.nearby","request_id":"nearby-1","payload":{"latitude":21.028511,"longitude":105.804817,"carrier_province_id":1,"carrier_district_id":100}}
 ```
 
+Mã tỉnh/quận trong ví dụ là placeholder; dùng mã GHN của tài khoản bạn. Lưu
+pickup_address với use_nearest_station=true và GPS/khu vực hợp lệ để backend
+tự chọn lại nơi gửi; thiếu ứng viên hợp lệ trả shipping_station_unavailable,
+không giả bưu cục. Lưu kết quả chuẩn, giữ tên/điện thoại người bán.
+
 Response: `data[]` gồm id/name/address, tọa độ/khoảng cách nếu có,
-`pickup_address` nếu ánh xạ được tuyến; kèm district, environment, complete,
+`pickup_address` nếu ánh xạ được tuyến; kèm selected, district, environment, complete,
 quote_only=true. `complete=false` khi chưa đọc hết danh mục (tối đa 5 trang
 100 dòng, dừng nếu hãng lặp trang). Không nhận token GHN từ FE. Tọa độ GPS
 chỉ để backend xếp hạng; GHN nhận mã quận, không nhận GPS cá nhân từ API này.

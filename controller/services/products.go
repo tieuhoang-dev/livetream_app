@@ -193,6 +193,9 @@ func UpdateProduct(userID, productID string, input UpdateProductInput) (*models.
 		}
 		return tx.First(product, "id = ?", productID).Error
 	})
+	if err == nil && input.Parcel != nil {
+		productShippingChanged(productID)
+	}
 	return product, err
 }
 

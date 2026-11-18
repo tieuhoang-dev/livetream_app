@@ -13,7 +13,7 @@ func ListLivestreams(c *gin.Context) {
 	if !bindListQuery(c, &query) {
 		return
 	}
-	items, total, err := services.ListLivestreams(query)
+	items, total, err := services.ListLivestreams(c.Request.Context(), query)
 	if err != nil {
 		writeServiceError(c, err)
 		return
@@ -25,7 +25,7 @@ func GetLivestream(c *gin.Context) {
 	if !validID(c, "livestream_id") {
 		return
 	}
-	live, err := services.GetLivestream(c.Param("livestream_id"))
+	live, err := services.GetLivestream(c.Request.Context(), c.Param("livestream_id"))
 	if err != nil {
 		writeServiceError(c, err)
 		return
@@ -38,7 +38,7 @@ func ListLivestreamProducts(c *gin.Context) {
 	if !validID(c, "livestream_id") || !bindListQuery(c, &page) {
 		return
 	}
-	items, total, err := services.ListLivestreamProducts(c.Param("livestream_id"), page)
+	items, total, err := services.ListLivestreamProducts(c.Request.Context(), c.Param("livestream_id"), page)
 	if err != nil {
 		writeServiceError(c, err)
 		return

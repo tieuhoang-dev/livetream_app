@@ -20,7 +20,7 @@ const (
 	BatchSize = 100
 )
 
-func StartChatWorkers(workerCount int) {
+func StartDirectChatWorkers(workerCount int) {
 	ctx := context.Background()
 
 	err := config.RedisClient.XGroupCreateMkStream(
@@ -146,11 +146,6 @@ func chatWorker(workerID int) {
 				"🟢 Worker %d saved + removed %d messages",
 				workerID,
 				len(redisIDs),
-			)
-			log.Printf(
-				"🟢 Worker %d saved %d messages",
-				workerID,
-				len(stream.Messages),
 			)
 		}
 	}

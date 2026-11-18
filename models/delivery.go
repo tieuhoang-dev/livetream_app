@@ -4,6 +4,7 @@ import "time"
 
 // DeliveryAddress is copied into orders, not joined to mutable profile data.
 type DeliveryAddress struct {
+	UseNearestStation bool     `json:"use_nearest_station,omitempty" gorm:"-"`
 	StationID         int      `json:"station_id,omitempty"`
 	StationName       string   `json:"station_name,omitempty" gorm:"size:255"`
 	CarrierProvinceID int      `json:"carrier_province_id,omitempty"`

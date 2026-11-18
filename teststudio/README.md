@@ -1,6 +1,6 @@
 # Livestream Test Studio
 
-Giao diện chạy bộ test Livestream API. Nạp sẵn 106 request từ collection của repo.
+Giao diện chạy bộ test Livestream API. Nạp sẵn 104 request từ collection của repo.
 
 1. Nhập URL backend và hai tài khoản test khác nhau.
 2. Chọn **Đăng ký mới** hoặc **Đã xác thực**; chọn các nhóm cần kiểm tra.
@@ -57,7 +57,7 @@ server hosting; request được gửi trực tiếp từ trình duyệt tới b
   Postman API cho collection tùy ý. Script chạy trong Worker riêng; request
   chỉ được gửi tới origin backend đã cấu hình.
 - Media thật và payment gateway chưa được backend tích hợp. Các loại tin chat
-  không phải upload media; collection HTTP 106 case chưa bao gồm toàn bộ
+  không phải upload media; collection HTTP 104 case chưa bao gồm toàn bộ
   checklist WebSocket/edge case trong tài liệu trước đó.
 
 ## Chẩn đoán kết nối
@@ -93,3 +93,5 @@ runner (xem postman/README.md). Bộ test unit của runner không gọi GHN; k�
 real-API ghi phía trên là lần chạy theo hợp đồng trước ShippingService.
 
 Trong Cấu hình phiên chạy, mở **Mã khu vực GHN cho nhóm đặt hàng** để điền sáu mã lấy/nhận. Không cần sửa mã nguồn Studio và không đưa Token GHN vào đây.
+
+Studio chuẩn bị live qua /api/ws, authenticate bằng frame và dùng live.create/live.end/live.get. HTTP collection còn 104 case; hai case handshake HTTP cũ được thay bằng kiểm thử WS trong REALTIME.md. Không đưa token vào URL, không tự gửi lại lệnh khi mất ACK.

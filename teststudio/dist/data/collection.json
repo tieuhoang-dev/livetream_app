@@ -486,63 +486,6 @@
           ]
         },
         {
-          "name": "AUTO-003 | WebSocket thiếu JWT",
-          "request": {
-            "method": "GET",
-            "auth": {
-              "type": "noauth"
-            },
-            "header": [],
-            "url": "{{base_url}}/api/auth/ws",
-            "description": "WebSocket thiếu JWT"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"AUTO-003: HTTP 401\", function () { pm.response.to.have.status(401); });",
-                  "const __livestreamBody = pm.response.json();",
-                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"Authorization token missing\"); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "AUTO-004 | WebSocket JWT sai",
-          "request": {
-            "method": "GET",
-            "auth": {
-              "type": "bearer",
-              "bearer": [
-                {
-                  "key": "token",
-                  "value": "invalid-token",
-                  "type": "string"
-                }
-              ]
-            },
-            "header": [],
-            "url": "{{base_url}}/api/auth/ws",
-            "description": "WebSocket JWT sai"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"AUTO-004: HTTP 401\", function () { pm.response.to.have.status(401); });",
-                  "const __livestreamBody = pm.response.json();",
-                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"Invalid token\"); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
           "name": "AUTO-005 | Thiếu JWT: POST /api/products",
           "request": {
             "method": "POST",
@@ -3570,7 +3513,7 @@
     },
     {
       "name": "04 - San pham live (can live_id)",
-      "description": "Dùng WebSocket seller gửi create_live, copy id vào live_id trước khi chạy. Không dùng product_id của folder 02; folder này tự tạo sản phẩm riêng.",
+      "description": "Dùng WebSocket seller gửi live.create, copy id vào live_id trước khi chạy. Không dùng product_id của folder 02; folder này tự tạo sản phẩm riêng.",
       "item": [
         {
           "name": "LIVE-001 | Tạo sản phẩm riêng cho live",
@@ -4449,7 +4392,7 @@
     },
     {
       "name": "05 - Live da ket thuc (can ended_live_id)",
-      "description": "Sau folder 04, end_live bằng WebSocket seller; copy ID đó vào ended_live_id. Chạy folder này để kiểm tra HTTP bị chặn đúng trạng thái.",
+      "description": "Sau folder 04, live.end bằng WebSocket seller; copy ID đó vào ended_live_id. Chạy folder này để kiểm tra HTTP bị chặn đúng trạng thái.",
       "item": [
         {
           "name": "END-001 | Không thêm sản phẩm vào live đã kết thúc",

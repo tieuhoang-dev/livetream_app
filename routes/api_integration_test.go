@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"livesteam_app/config"
-	controllers "livesteam_app/controller/controller"
 	"livesteam_app/models"
 	"livesteam_app/routes"
 	"livesteam_app/utils"
@@ -27,7 +26,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"github.com/gorilla/websocket"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -56,16 +54,14 @@ func TestConnectedAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	models.MigrateAll(db)
-	oldDB, oldControllerDB := config.DB, controllers.DB
+	oldDB := config.DB
 	oldShipping := config.ShippingProvider
 	carrier := &quoteFixture{}
 	config.ShippingProvider = carrier
 	config.DB = db
-	controllers.SetDatabase(db)
 	t.Cleanup(func() {
 		config.DB = oldDB
 		config.ShippingProvider = oldShipping
-		controllers.SetDatabase(oldControllerDB)
 		sqlDB, _ := db.DB()
 		sqlDB.Close()
 	})
@@ -135,7 +131,10 @@ func TestConnectedAPI(t *testing.T) {
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Static("/uploads", "./uploads")
+	oldRealtime := config.Realtime
 	routes.SetupUserRoutes(r)
+	hub := config.Realtime
+	t.Cleanup(func() { hub.Close(); config.Realtime = oldRealtime })
 	server := httptest.NewServer(r)
 	defer server.Close()
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -228,9 +227,12 @@ func TestConnectedAPI(t *testing.T) {
 		return out["order_id"].(string)
 	}
 
+	rpc := func(t *testing.T, actor, kind string, payload interface{}, want int) map[string]interface{} {
+		t.Helper()
+		return dialRealtime(t, server.URL, tokens[actor]).command(t, kind, payload, want)
+	}
 	t.Run("protected routes require JWT", func(t *testing.T) {
 		for _, endpoint := range [][2]string{
-			{"GET", "/api/shipping/status"}, {"GET", "/api/shipping/provinces"}, {"GET", "/api/shipping/districts?province_id=1"}, {"GET", "/api/shipping/wards?district_id=100"},
 			{"POST", "/api/products"}, {"PATCH", "/api/products/" + uuid.NewString()},
 			{"DELETE", "/api/products/" + uuid.NewString()}, {"POST", "/api/products/" + uuid.NewString() + "/stock"},
 			{"PUT", "/api/users/me"}, {"POST", "/api/users/me/avatar"}, {"POST", "/api/orders"},
@@ -550,137 +552,84 @@ func TestConnectedAPI(t *testing.T) {
 		}
 	})
 
-	t.Run("public websocket live lists validate filters and push lifecycle changes", func(t *testing.T) {
-		baseWS := "ws" + strings.TrimPrefix(server.URL, "http")
-		dial := func(path string) *websocket.Conn {
-			t.Helper()
-			conn, _, err := websocket.DefaultDialer.Dial(baseWS+path, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { conn.Close() })
-			return conn
-		}
-		auth := dial("/api/auth/ws?token=" + tokens[seller.ID])
-		first, second := dial("/api/livestreams/ws"), dial("/api/livestreams/ws")
-		send := func(conn *websocket.Conn, message gin.H) {
-			t.Helper()
-			if err := conn.WriteJSON(message); err != nil {
-				t.Fatal(err)
-			}
-		}
-		read := func(conn *websocket.Conn, accept func(map[string]interface{}) bool) map[string]interface{} {
-			t.Helper()
-			conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-			for {
-				var reply map[string]interface{}
-				if err := conn.ReadJSON(&reply); err != nil {
-					t.Fatal(err)
-				}
-				if accept(reply) {
-					return reply
-				}
-			}
-		}
-		page := func(conn *websocket.Conn, requestID string, total int) map[string]interface{} {
-			t.Helper()
-			return read(conn, func(r map[string]interface{}) bool {
-				return r["type"] == "list_lives_success" && r["request_id"] == requestID && r["total"] == float64(total)
-			})
-		}
-		command := func(kind, content string) map[string]interface{} {
-			t.Helper()
-			send(auth, gin.H{"type": kind, "content": content})
-			return read(auth, func(r map[string]interface{}) bool { return r["type"] == kind+"_success" })
-		}
+	t.Run("shared websocket supports guest lists, room snapshots and independent authenticated sessions", func(t *testing.T) {
+		first, second := dialRealtime(t, server.URL, ""), dialRealtime(t, server.URL, "")
+		auth, otherSession := dialRealtime(t, server.URL, tokens[seller.ID]), dialRealtime(t, server.URL, tokens[seller.ID])
 		prefix := "WS list " + uuid.NewString()
-		send(first, gin.H{"type": "list_lives", "request_id": "all", "query": gin.H{"q": prefix, "seller_id": seller.ID, "status": "all", "sort": "oldest", "page_size": 1}})
-		send(second, gin.H{"type": "list_lives", "request_id": "open", "query": gin.H{"q": prefix}})
-		page(first, "all", 0)
-		page(second, "open", 0)
-		idA := command("create_live", prefix+"_A")["id"].(string)
-		created := page(first, "all", 1)
-		page(second, "open", 1)
+		all := first.subscribe(t, "lives.subscribe", gin.H{"q": prefix, "status": "all", "sort": "oldest", "page_size": 1})
+		open := second.subscribe(t, "lives.subscribe", gin.H{"q": prefix})
+		page := func(c *wsTestClient, id string, want int) map[string]interface{} {
+			t.Helper()
+			for {
+				packet := c.event(t, id, "snapshot")
+				if packet["error"] != nil {
+					t.Fatal(packet)
+				}
+				data := packet["data"].(map[string]interface{})
+				if data["total"] == float64(want) {
+					return data
+				}
+			}
+		}
+		page(first, all, 0)
+		page(second, open, 0)
+		idA := auth.command(t, "live.create", gin.H{"title": prefix + "_A"}, 200)["id"].(string)
+		created := page(first, all, 1)
+		page(second, open, 1)
 		entry := created["data"].([]interface{})[0].(map[string]interface{})
-		if entry["id"] != idA || entry["seller_username"] != seller.Username || created["page_size"] != float64(1) {
-			t.Fatalf("wrong live snapshot: %v", created)
+		if entry["id"] != idA || entry["seller_username"] != seller.Username {
+			t.Fatal(created)
 		}
-		for _, secret := range []string{"email", "password_hash", "user", "stream_url"} {
-			if _, leaked := entry[secret]; leaked {
-				t.Fatalf("public list leaked %s", secret)
+		for _, key := range []string{"email", "password_hash", "user", "phone", "pickup_address"} {
+			if entry[key] != nil {
+				t.Fatalf("public list leaked %s", key)
 			}
 		}
-		db.Model(&models.Livestream{}).Where("id = ?", idA).Update("started_at", time.Now().Add(-time.Hour))
-		idB := command("create_live", prefix+"XA")["id"].(string)
-		ordered := page(first, "all", 2)
-		if ordered["data"].([]interface{})[0].(map[string]interface{})["id"] != idA {
-			t.Fatalf("oldest sort not applied: %v", ordered)
-		}
-		page(second, "open", 2)
-		send(first, gin.H{"type": "list_lives", "request_id": "literal", "query": gin.H{"q": prefix + "_A"}})
-		page(first, "literal", 1)
-		for _, invalid := range []gin.H{{"page": 0}, {"page_size": 101}, {"page_size": "20"}, {"status": "bad"}, {"sort": "price"}, {"seller_id": "bad"}, {"product_id": "bad"}, {"q": strings.Repeat("a", 101)}} {
-			send(first, gin.H{"type": "list_lives", "request_id": "invalid", "query": invalid})
-			reply := read(first, func(r map[string]interface{}) bool { return r["request_id"] == "invalid" })
-			if reply["type"] != "list_lives_error" || reply["error"] != "invalid_query" {
-				t.Fatalf("accepted invalid filter %v: %v", invalid, reply)
+		room := first.subscribe(t, "live.subscribe", gin.H{"livestream_id": idA})
+		snapshot := first.event(t, room, "snapshot")["data"].(map[string]interface{})
+		origin := snapshot["shipping_origin"].(map[string]interface{})
+		for _, key := range []string{"phone", "name", "address_line", "latitude", "longitude"} {
+			if origin[key] != nil {
+				t.Fatalf("public room leaked %s", key)
 			}
 		}
-		// This public endpoint must never execute authenticated commands.
-		send(first, gin.H{"type": "create_live", "request_id": "readonly", "content": "Forbidden"})
-		denied := read(first, func(r map[string]interface{}) bool { return r["request_id"] == "readonly" })
-		if denied["type"] != "list_lives_error" {
-			t.Fatal("public socket accepted a write")
+		idB := otherSession.command(t, "live.create", gin.H{"title": prefix + "XA"}, 200)["id"].(string)
+		page(first, all, 2)
+		page(second, open, 2)
+		for _, invalid := range []gin.H{{"page": 0}, {"page_size": 101}, {"status": "bad"}, {"seller_id": "bad"}, {"q": strings.Repeat("a", 101)}} {
+			first.command(t, "lives.list", invalid, 400)
 		}
-		p := product(t, seller.ID, 10)
-		send(first, gin.H{"type": "list_lives", "request_id": "product", "query": gin.H{"seller_id": seller.ID, "product_id": p.ID}})
-		page(first, "product", 0)
-		call(t, seller.ID, "POST", "/api/livestreams/"+idA+"/products", gin.H{"product_id": p.ID, "discount_price": 80, "stock_quantity": 2}, 201)
-		page(first, "product", 1)
-		call(t, seller.ID, "DELETE", "/api/livestreams/"+idA+"/products/"+p.ID, nil, 204)
-		page(first, "product", 0)
-		command("end_live", idA)
-		page(second, "open", 1)
-		call(t, seller.ID, "POST", "/api/livestreams/"+idB+"/end", nil, 200)
-		page(second, "open", 0)
-		send(first, gin.H{"type": "list_lives", "request_id": "page2", "query": gin.H{"q": prefix, "status": "end", "sort": "oldest", "page": 2, "page_size": 1}})
-		ended := page(first, "page2", 2)
-		if ended["page"] != float64(2) || ended["data"].([]interface{})[0].(map[string]interface{})["id"] != idB {
-			t.Fatalf("wrong ended page: %v", ended)
+		first.command(t, "live.create", gin.H{"title": "Forbidden"}, 401)
+		auth.command(t, "live.end", gin.H{"livestream_id": idA}, 200)
+		page(second, open, 1)
+		otherSession.command(t, "live.end", gin.H{"livestream_id": idB}, 200)
+		page(second, open, 0)
+		ended := first.event(t, room, "snapshot")["data"].(map[string]interface{})
+		if ended["live"].(map[string]interface{})["status"] != "end" {
+			ended = first.event(t, room, "snapshot")["data"].(map[string]interface{})
 		}
-		first.Close()
-		reconnected := dial("/api/livestreams/ws")
-		send(reconnected, gin.H{"type": "list_lives", "request_id": "again", "query": gin.H{"q": prefix, "status": "end"}})
-		page(reconnected, "again", 2)
+		if ended["live"].(map[string]interface{})["status"] != "end" {
+			t.Fatal("ended live was not pushed")
+		}
+		reconnect := dialRealtime(t, server.URL, "")
+		after := reconnect.subscribe(t, "lives.subscribe", gin.H{"q": prefix, "status": "end"})
+		page(reconnect, after, 2)
 	})
 
 	t.Run("create live and manage its products", func(t *testing.T) {
-		ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/api/auth/ws?token="+tokens[seller.ID], nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer ws.Close()
-		ws.SetReadDeadline(time.Now().Add(10 * time.Second))
-		ws.WriteJSON(gin.H{"type": "create_live", "content": "API integration live"})
-		var response map[string]interface{}
-		if err := ws.ReadJSON(&response); err != nil {
-			t.Fatal(err)
-		}
-		if response["type"] != "create_live_success" {
-			t.Fatalf("create_live: %v", response)
-		}
+		ws := dialRealtime(t, server.URL, tokens[seller.ID])
+		response := ws.command(t, "live.create", gin.H{"title": "API integration live"}, 200)
 		liveID := response["id"].(string)
 		assertJoin := func(id, want string) {
 			t.Helper()
-			if err := ws.WriteJSON(gin.H{"type": "join_live", "content": id}); err != nil {
-				t.Fatal(err)
-			}
-			var reply map[string]interface{}
-			if err := ws.ReadJSON(&reply); err != nil {
-				t.Fatal(err)
-			}
-			if reply["type"] != want {
-				t.Fatalf("join_live: want %s, got %v", want, reply)
+			sub := ws.subscribe(t, "live.subscribe", gin.H{"livestream_id": id})
+			packet := ws.event(t, sub, "snapshot")
+			if want == "join_live_success" {
+				if packet["error"] != nil {
+					t.Fatal(packet)
+				}
+			} else if id != liveID && packet["error"] != "livestream_not_found" {
+				t.Fatal(packet)
 			}
 		}
 		assertJoin(liveID, "join_live_success")
@@ -729,34 +678,23 @@ func TestConnectedAPI(t *testing.T) {
 		if stock(t, p.ID) != 20 {
 			t.Fatal("removal did not return unsold live allocation")
 		}
-		ws.WriteJSON(gin.H{"type": "end_live", "content": liveID})
-		if err := ws.ReadJSON(&response); err != nil || response["type"] != "end_live_success" {
-			t.Fatalf("end_live: %v %v", response, err)
-		}
+		ws.command(t, "live.end", gin.H{"livestream_id": liveID}, 200)
 		assertJoin(liveID, "join_live_error")
 		call(t, seller.ID, "POST", path, payload, 409)
 		call(t, buyer.ID, "POST", "/api/orders", gin.H{"product_id": p.ID, "quantity": 1, "livestream_id": liveID, "payment_method": "manual"}, 409)
 	})
 
 	t.Run("discover livestreams and reconcile live and offline sales", func(t *testing.T) {
-		ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http")+"/api/auth/ws?token="+tokens[seller.ID], nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer ws.Close()
-		if err := ws.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
-			t.Fatal(err)
-		}
+		ws := dialRealtime(t, server.URL, tokens[seller.ID])
 		liveMessage := func(kind, content string) map[string]interface{} {
 			t.Helper()
-			if err := ws.WriteJSON(gin.H{"type": kind, "content": content}); err != nil {
-				t.Fatal(err)
+			command := "live.create"
+			payload := gin.H{"title": content}
+			if kind == "end_live" {
+				command = "live.end"
+				payload = gin.H{"livestream_id": content}
 			}
-			var reply map[string]interface{}
-			if err := ws.ReadJSON(&reply); err != nil || reply["type"] != kind+"_success" {
-				t.Fatalf("%s: %v %v", kind, reply, err)
-			}
-			return reply
+			return ws.command(t, command, payload, 200)
 		}
 		prefix := "Live " + uuid.NewString()
 		liveID := liveMessage("create_live", prefix+"_A")["id"].(string)
@@ -891,59 +829,73 @@ func TestConnectedAPI(t *testing.T) {
 		}
 	})
 
-	t.Run("comments are shared within one livestream", func(t *testing.T) {
+	t.Run("comments use shared websocket rooms and persist Mongo before acknowledgement", func(t *testing.T) {
 		if os.Getenv("TEST_MONGO_URI") == "" {
-			t.Skip("set TEST_MONGO_URI for Mongo comment HTTP tests")
+			t.Skip("set TEST_MONGO_URI for Mongo WebSocket comment tests")
 		}
-		newLive := func() string {
+		create := func() string {
 			t.Helper()
-			live := models.Livestream{ID: uuid.NewString(), SellerID: seller.ID, Title: "Comments test", Status: "start", StartedAt: time.Now()}
+			live := models.Livestream{ID: uuid.NewString(), SellerID: seller.ID, Title: "WS comments", Status: "start", StartedAt: time.Now()}
 			if err := db.Create(&live).Error; err != nil {
 				t.Fatal(err)
 			}
-			return "/api/livestreams/" + live.ID
+			return live.ID
 		}
-		live := newLive()
-		path := live + "/comments"
-		call(t, "", "GET", path, nil, 401)
-		call(t, "", "POST", path, gin.H{"content": "Hi"}, 401)
-		call(t, buyer.ID, "GET", path+"?after=-1", nil, 400)
-		call(t, buyer.ID, "POST", path, gin.H{"content": "   "}, 400)
-		call(t, buyer.ID, "POST", path, gin.H{"content": strings.Repeat("ệ", 301)}, 400)
-		first := call(t, buyer.ID, "POST", path, gin.H{"content": "  Hàng còn không?  ", "username": "fake"}, 201)
-		if first["content"] != "Hàng còn không?" || first["username"] != buyer.Username || first["id"] == "" {
-			t.Fatalf("unexpected comment: %v", first)
+		liveID, otherLive := create(), create()
+		sender, viewer, isolated := dialRealtime(t, server.URL, tokens[buyer.ID]), dialRealtime(t, server.URL, tokens[seller.ID]), dialRealtime(t, server.URL, tokens[other.ID])
+		anonymous := dialRealtime(t, server.URL, "")
+		anonymous.command(t, "comments.send", gin.H{"livestream_id": liveID, "content": "Hi"}, 401)
+		sender.command(t, "comments.subscribe", gin.H{"livestream_id": liveID, "after": "-1"}, 400)
+		room := viewer.subscribe(t, "comments.subscribe", gin.H{"livestream_id": liveID, "after": "0"})
+		if rows := viewer.event(t, room, "snapshot")["data"].(map[string]interface{})["data"].([]interface{}); len(rows) != 0 {
+			t.Fatal(rows)
 		}
-		all := call(t, seller.ID, "GET", path, nil, 200)
-		if len(all["data"].([]interface{})) != 1 || all["next_cursor"] != first["id"] || all["has_more"] != false {
-			t.Fatalf("unexpected comment history: %v", all)
+		isolatedRoom := isolated.subscribe(t, "comments.subscribe", gin.H{"livestream_id": otherLive})
+		isolated.event(t, isolatedRoom, "snapshot")
+		sender.command(t, "comments.send", gin.H{"livestream_id": liveID, "content": "   "}, 400)
+		sender.command(t, "comments.send", gin.H{"livestream_id": liveID, "content": strings.Repeat("ệ", 301)}, 400)
+		first := sender.command(t, "comments.send", gin.H{"livestream_id": liveID, "content": "  Hàng còn không?  ", "username": "fake", "sender_id": other.ID}, 200)
+		if first["content"] != "Hàng còn không?" || first["username"] != buyer.Username {
+			t.Fatal(first)
 		}
-		second := call(t, seller.ID, "POST", path, gin.H{"content": "Còn hàng nhé"}, 201)
-		next := call(t, buyer.ID, "GET", path+"?after="+first["id"].(string), nil, 200)
-		if len(next["data"].([]interface{})) != 1 || next["next_cursor"] != second["id"] {
-			t.Fatalf("unexpected incremental result: %v", next)
-		}
-		other := call(t, buyer.ID, "GET", newLive()+"/comments", nil, 200)
-		if len(other["data"].([]interface{})) != 0 {
-			t.Fatalf("comments leaked to another room: %v", other)
-		}
-		call(t, seller.ID, "POST", live+"/end", nil, 200)
-		call(t, buyer.ID, "POST", path, gin.H{"content": "Kết thúc rồi?"}, 409)
-		afterEnd := call(t, buyer.ID, "GET", path, nil, 200)
-		if len(afterEnd["data"].([]interface{})) != 2 {
-			t.Fatalf("comment history after end: %v", afterEnd)
+		pushed := viewer.event(t, room, "comment.created")["data"].(map[string]interface{})
+		if pushed["id"] != first["id"] {
+			t.Fatal("live comment was not pushed")
 		}
 		var doc models.LivestreamComment
-		if err := config.ChatCollection.FindOne(context.Background(), bson.M{"_id": "live-comment:" + strings.TrimPrefix(live, "/api/livestreams/") + ":" + first["id"].(string)}).Decode(&doc); err != nil {
+		if err := config.ChatCollection.FindOne(context.Background(), bson.M{"_id": "live-comment:" + liveID + ":" + first["id"].(string)}).Decode(&doc); err != nil {
 			t.Fatal(err)
 		}
-		if doc.Content != first["content"] || doc.MessageType != "livestream_comment" {
-			t.Fatal("HTTP response returned before Mongo persisted the comment")
+		if doc.Content != first["content"] || doc.UserID != buyer.ID {
+			t.Fatal("ack came before durable Mongo write or trusted forged sender")
+		}
+		second := sender.command(t, "comments.send", gin.H{"livestream_id": liveID, "content": "Tin tiếp theo"}, 200)
+		viewer.event(t, room, "comment.created")
+		reconnect := dialRealtime(t, server.URL, tokens[buyer.ID])
+		resume := reconnect.subscribe(t, "comments.subscribe", gin.H{"livestream_id": liveID, "after": first["id"]})
+		history := reconnect.event(t, resume, "snapshot")["data"].(map[string]interface{})
+		if len(history["data"].([]interface{})) != 1 || history["next_cursor"] != second["id"] {
+			t.Fatal("reconnect cursor did not recover history", history)
+		}
+		isolated.command(t, "lives.list", gin.H{}, 200)
+		for _, packet := range isolated.inbox {
+			if packet["event"] == "comment.created" {
+				t.Fatal("comment leaked across rooms")
+			}
+		}
+		viewer.command(t, "live.end", gin.H{"livestream_id": liveID}, 200)
+		sender.command(t, "comments.send", gin.H{"livestream_id": liveID, "content": "Ended"}, 409)
+		obsolete, err := client.Get(server.URL + "/api/livestreams/" + liveID + "/comments")
+		if err != nil {
+			t.Fatal(err)
+		}
+		obsolete.Body.Close()
+		if obsolete.StatusCode != 404 {
+			t.Fatal("obsolete HTTP comments endpoint still registered")
 		}
 		if db.Migrator().HasTable("livestream_comments") {
-			t.Fatal("HTTP comments created SQL content storage")
+			t.Fatal("comments created SQL content storage")
 		}
-
 	})
 
 	t.Run("LiveKit grants and ending a room", func(t *testing.T) {
@@ -1100,9 +1052,9 @@ func TestConnectedAPI(t *testing.T) {
 
 	t.Run("station drop-off quotes canonical origin without creating a shipment", func(t *testing.T) {
 		lookup := gin.H{"latitude": 21.028511, "longitude": 105.804817, "carrier_province_id": 1, "carrier_district_id": 100}
-		call(t, "", "POST", "/api/shipping/stations/nearby", lookup, 401)
-		call(t, seller.ID, "POST", "/api/shipping/stations/nearby", gin.H{"latitude": 91, "longitude": 105}, 400)
-		nearby := call(t, seller.ID, "POST", "/api/shipping/stations/nearby", lookup, 200)
+		rpc(t, "", "shipping.stations.nearby", lookup, 401)
+		rpc(t, seller.ID, "shipping.stations.nearby", gin.H{"latitude": 91, "longitude": 105}, 400)
+		nearby := rpc(t, seller.ID, "shipping.stations.nearby", lookup, 200)
 		if nearby["quote_only"] != true || len(nearby["data"].([]interface{})) != 1 {
 			t.Fatal("missing station results", nearby)
 		}
@@ -1241,18 +1193,72 @@ func TestConnectedAPI(t *testing.T) {
 		}
 	})
 
+	t.Run("automatic station origin and inventory or order changes reach only authorized subscribers", func(t *testing.T) {
+		sellerWS, buyerWS, otherWS := dialRealtime(t, server.URL, tokens[seller.ID]), dialRealtime(t, server.URL, tokens[buyer.ID]), dialRealtime(t, server.URL, tokens[other.ID])
+		liveID := sellerWS.command(t, "live.create", gin.H{"title": "Automatic drop-off"}, 200)["id"].(string)
+		room := buyerWS.subscribe(t, "live.subscribe", gin.H{"livestream_id": liveID})
+		buyerWS.event(t, room, "snapshot")
+		pickup := gin.H{"name": "Seller contact", "phone": "0901234567", "province_code": "1", "carrier_province_id": 1, "carrier_district_id": 100, "latitude": 21.028511, "longitude": 105.804817, "use_nearest_station": true}
+		selected := sellerWS.command(t, "shipping.pickup.save", gin.H{"livestream_id": liveID, "pickup_address": pickup}, 200)["pickup_address"].(map[string]interface{})
+		if selected["station_id"] != float64(1888) || selected["address_line"] != "10 Đường bưu cục" {
+			t.Fatal("BE did not choose nearest verified station", selected)
+		}
+		buyerWS.command(t, "shipping.pickup.save", gin.H{"livestream_id": liveID, "pickup_address": pickup}, 403)
+		p := product(t, seller.ID, 6)
+		sellerWS.command(t, "live.products.add", gin.H{"livestream_id": liveID, "product_id": p.ID, "discount_price": 80, "stock_quantity": 4}, 200)
+		buyerOrders := buyerWS.subscribe(t, "orders.subscribe", gin.H{})
+		sellerOrders := sellerWS.subscribe(t, "orders.subscribe", gin.H{})
+		otherWS.subscribe(t, "orders.subscribe", gin.H{"user_id": buyer.ID})
+		placed := call(t, buyer.ID, "POST", "/api/orders", gin.H{"product_id": p.ID, "quantity": 1, "livestream_id": liveID, "payment_method": "cod", "delivery": deliveryFixture}, 201)
+		for _, sub := range []struct {
+			client *wsTestClient
+			id     string
+		}{{buyerWS, buyerOrders}, {sellerWS, sellerOrders}} {
+			event := sub.client.event(t, sub.id, "order.changed")
+			data := event["data"].(map[string]interface{})
+			if data["order_id"] != placed["order_id"] || data["recipient"] != nil {
+				t.Fatal("wrong private order notification", event)
+			}
+		}
+		for {
+			event := buyerWS.event(t, room, "snapshot")
+			data := event["data"].(map[string]interface{})
+			products := data["products"].(map[string]interface{})["data"].([]interface{})
+			if len(products) > 0 && products[0].(map[string]interface{})["stock_quantity"] == float64(3) {
+				break
+			}
+		}
+		otherWS.command(t, "lives.list", gin.H{}, 200)
+		for _, event := range otherWS.inbox {
+			if event["event"] == "order.changed" {
+				t.Fatal("order event leaked to another account")
+			}
+		}
+		assertLegacySocketRejected(t, server.URL, "/api/livestreams/ws")
+		for _, path := range []string{"/api/auth/ws", "/api/shipping/provinces"} {
+			response, err := client.Get(server.URL + path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response.Body.Close()
+			if response.StatusCode != 404 {
+				t.Fatalf("obsolete transport still exposed: %s", path)
+			}
+		}
+	})
+
 	t.Run("carrier status catalogs and route validation", func(t *testing.T) {
-		status := call(t, buyer.ID, "GET", "/api/shipping/status", nil, 200)
+		status := rpc(t, buyer.ID, "shipping.status", gin.H{}, 200)
 		if status["quote_only"] != true || status["environment"] != "staging" || status["token"] != nil {
 			t.Fatal("unsafe provider status", status)
 		}
-		provinces := call(t, buyer.ID, "GET", "/api/shipping/provinces", nil, 200)
+		provinces := rpc(t, buyer.ID, "shipping.provinces", gin.H{}, 200)
 		if len(provinces["data"].([]interface{})) != 2 {
 			t.Fatal(provinces)
 		}
-		call(t, buyer.ID, "GET", "/api/shipping/districts?province_id=1", nil, 200)
-		call(t, buyer.ID, "GET", "/api/shipping/wards?district_id=100", nil, 200)
-		call(t, buyer.ID, "GET", "/api/shipping/districts?province_id=bad", nil, 400)
+		rpc(t, buyer.ID, "shipping.districts", gin.H{"province_id": 1}, 200)
+		rpc(t, buyer.ID, "shipping.wards", gin.H{"district_id": 100}, 200)
+		rpc(t, buyer.ID, "shipping.districts", gin.H{"province_id": "bad"}, 400)
 		p := product(t, seller.ID, 4)
 		input := gin.H{"product_id": p.ID, "quantity": 1, "delivery": gin.H{"province_code": "1", "carrier_province_id": 79, "carrier_district_id": 7900, "carrier_ward_code": "ward-7900"}}
 		before := carrier.calls.Load()
@@ -1273,7 +1279,7 @@ func TestConnectedAPI(t *testing.T) {
 		t.Setenv("GHN_TOKEN", "")
 		t.Setenv("GHN_SHOP_ID", "")
 		defer func() { config.ShippingProvider = carrier; carrier.failure = nil }()
-		status := call(t, buyer.ID, "GET", "/api/shipping/status", nil, 200)
+		status := rpc(t, buyer.ID, "shipping.status", gin.H{}, 200)
 		if status["configured"] != false {
 			t.Fatal("missing credentials reported configured")
 		}

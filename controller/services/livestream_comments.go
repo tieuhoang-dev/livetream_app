@@ -96,6 +96,9 @@ func AddLivestreamComment(ctx context.Context, liveID, userID, username, content
 		_, err = config.ChatCollection.InsertOne(mongoCtx, comment)
 		return err
 	})
+	if err == nil {
+		config.Realtime.Publish("comments:"+liveID, "comment.created", comment)
+	}
 	return comment, err
 }
 

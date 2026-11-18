@@ -1,151 +1,217 @@
 {
-  "description": "Thư viện payload để copy vào Postman WebSocket Request. Không phải collection import tự động.",
-  "seller_url": "{{ws_url}}/api/auth/ws?token={{seller_token}}",
-  "buyer_url": "{{ws_url}}/api/auth/ws?token={{buyer_token}}",
+  "description": "Copy payload vào Postman WS. Thay các mã khu vực 0 bằng mã GHN thật trước khi gửi.",
+  "seller_url": "{{ws_url}}/api/ws",
+  "buyer_url": "{{ws_url}}/api/ws",
   "messages": [
+    {
+      "case": "WS-001",
+      "tab": "guest",
+      "payload": {
+        "type": "live.create",
+        "request_id": "ws-001",
+        "payload": {
+          "title": "Không được tạo"
+        }
+      }
+    },
+    {
+      "case": "WS-002",
+      "tab": "guest",
+      "payload": {
+        "type": "authenticate",
+        "request_id": "ws-002",
+        "payload": {
+          "token": "invalid-token"
+        }
+      }
+    },
     {
       "case": "WS-003",
       "tab": "seller",
       "payload": {
-        "type": "create_live",
-        "content": "Postman live"
+        "type": "authenticate",
+        "request_id": "ws-003",
+        "payload": {
+          "token": "{{seller_token}}"
+        }
+      }
+    },
+    {
+      "case": "WS-003-buyer",
+      "tab": "buyer",
+      "payload": {
+        "type": "authenticate",
+        "request_id": "ws-003-buyer",
+        "payload": {
+          "token": "{{buyer_token}}"
+        }
       }
     },
     {
       "case": "WS-004",
-      "tab": "buyer",
+      "tab": "guest",
       "payload": {
-        "type": "join_live",
-        "content": "{{live_id}}"
+        "type": "lives.subscribe",
+        "request_id": "ws-004",
+        "payload": {
+          "status": "start",
+          "page": 1,
+          "page_size": 12
+        },
+        "subscription_id": "catalog"
       }
     },
     {
       "case": "WS-005",
-      "tab": "buyer",
+      "tab": "seller",
       "payload": {
-        "type": "end_live",
-        "content": "{{live_id}}"
+        "type": "live.create",
+        "request_id": "ws-005",
+        "payload": {
+          "title": "Postman live"
+        }
       }
     },
     {
       "case": "WS-006",
       "tab": "buyer",
       "payload": {
-        "type": "join_live",
-        "content": "{{missing_id}}"
+        "type": "live.subscribe",
+        "request_id": "ws-006",
+        "payload": {
+          "livestream_id": "{{live_id}}",
+          "page": 1,
+          "page_size": 12
+        },
+        "subscription_id": "room"
       }
     },
     {
-      "case": "WS-007/008",
-      "tab": "seller",
+      "case": "WS-007",
+      "tab": "buyer",
       "payload": {
-        "type": "text",
-        "receiver_id": "{{buyer_id}}",
-        "sender_id": "{{buyer_id}}",
-        "temp_id": "pm-msg-001",
-        "content": "Xin chào từ Postman"
+        "type": "comments.subscribe",
+        "request_id": "ws-007",
+        "payload": {
+          "livestream_id": "{{live_id}}",
+          "after": "0"
+        },
+        "subscription_id": "comments"
+      }
+    },
+    {
+      "case": "WS-008",
+      "tab": "buyer",
+      "payload": {
+        "type": "comments.send",
+        "request_id": "ws-008",
+        "payload": {
+          "livestream_id": "{{live_id}}",
+          "content": "Còn hàng không?",
+          "sender_id": "{{seller_id}}"
+        }
       }
     },
     {
       "case": "WS-009",
-      "tab": "seller",
+      "tab": "buyer",
       "payload": {
-        "type": "text",
-        "temp_id": "pm-missing-receiver",
-        "content": "Thiếu người nhận"
+        "type": "live.end",
+        "request_id": "ws-009",
+        "payload": {
+          "livestream_id": "{{live_id}}"
+        }
       }
     },
     {
       "case": "WS-010",
       "tab": "seller",
       "payload": {
-        "type": "message",
-        "receiver_id": "{{buyer_id}}",
-        "temp_id": "pm-message-001",
-        "content": "Postman message test"
-      }
-    },
-    {
-      "case": "WS-010",
-      "tab": "seller",
-      "payload": {
-        "type": "text",
-        "receiver_id": "{{buyer_id}}",
-        "temp_id": "pm-text-001",
-        "content": "Postman text test"
-      }
-    },
-    {
-      "case": "WS-010",
-      "tab": "seller",
-      "payload": {
-        "type": "image",
-        "receiver_id": "{{buyer_id}}",
-        "temp_id": "pm-image-001",
-        "content": "Postman image test"
-      }
-    },
-    {
-      "case": "WS-010",
-      "tab": "seller",
-      "payload": {
-        "type": "video",
-        "receiver_id": "{{buyer_id}}",
-        "temp_id": "pm-video-001",
-        "content": "Postman video test"
-      }
-    },
-    {
-      "case": "WS-010",
-      "tab": "seller",
-      "payload": {
-        "type": "voice",
-        "receiver_id": "{{buyer_id}}",
-        "temp_id": "pm-voice-001",
-        "content": "Postman voice test"
-      }
-    },
-    {
-      "case": "WS-010",
-      "tab": "seller",
-      "payload": {
-        "type": "file",
-        "receiver_id": "{{buyer_id}}",
-        "temp_id": "pm-file-001",
-        "content": "Postman file test"
+        "type": "live.end",
+        "request_id": "ws-010",
+        "payload": {
+          "livestream_id": "{{live_id}}"
+        }
       }
     },
     {
       "case": "WS-011",
-      "tab": "seller",
-      "payload": {
-        "type": "end_live",
-        "content": "{{live_id}}"
-      }
-    },
-    {
-      "case": "WS-012",
       "tab": "buyer",
       "payload": {
-        "type": "join_live",
-        "content": "{{ended_live_id}}"
+        "type": "live.get",
+        "request_id": "ws-011",
+        "payload": {
+          "livestream_id": "{{live_id}}"
+        }
       }
     },
     {
-      "case": "WS-016",
-      "tab": "public live list",
+      "case": "WS-013",
+      "tab": "seller",
       "payload": {
-        "type": "list_lives",
-        "request_id": "catalog-1",
-        "query": {
-          "status": "start",
-          "sort": "newest",
-          "q": "",
-          "page": 1,
-          "page_size": 12
+        "type": "shipping.stations.nearby",
+        "request_id": "ws-013",
+        "payload": {
+          "latitude": 21.028511,
+          "longitude": 105.804817,
+          "carrier_province_id": 0,
+          "carrier_district_id": 0
+        }
+      }
+    },
+    {
+      "case": "WS-014",
+      "tab": "seller",
+      "payload": {
+        "type": "shipping.pickup.save",
+        "request_id": "ws-014",
+        "payload": {
+          "livestream_id": "{{live_id}}",
+          "pickup_address": {
+            "name": "Shop test",
+            "phone": "0901234567",
+            "carrier_province_id": 0,
+            "carrier_district_id": 0,
+            "latitude": 21.028511,
+            "longitude": 105.804817,
+            "use_nearest_station": true
+          }
+        }
+      }
+    },
+    {
+      "case": "WS-015",
+      "tab": "buyer",
+      "payload": {
+        "type": "orders.subscribe",
+        "request_id": "ws-015",
+        "payload": {},
+        "subscription_id": "orders"
+      }
+    },
+    {
+      "case": "WS-018-sub",
+      "tab": "buyer",
+      "payload": {
+        "type": "chat.subscribe",
+        "request_id": "ws-018-sub",
+        "payload": {},
+        "subscription_id": "messages"
+      }
+    },
+    {
+      "case": "WS-018-send",
+      "tab": "seller",
+      "payload": {
+        "type": "chat.send",
+        "request_id": "ws-018-send",
+        "payload": {
+          "receiver_id": "{{buyer_id}}",
+          "message_type": "text",
+          "content": "Tin nhắn riêng",
+          "temp_id": "postman-1"
         }
       }
     }
-  ],
-  "public_live_url": "{{ws_url}}/api/livestreams/ws"
+  ]
 }

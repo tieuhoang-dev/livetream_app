@@ -61,5 +61,28 @@ func SaveLivePickup(ctx context.Context, userID, liveID string, input models.Del
 		}
 		return tx.Save(&models.LivestreamPickup{LivestreamID: liveID, Address: address}).Error
 	})
+	if err == nil {
+		liveChanged(liveID)
+		shippingChanged(liveID)
+	}
 	return &address, err
+}
+
+func PublicLiveOrigin(ctx context.Context, liveID, sellerID string) (any, error) {
+	address, err := checkoutPickup(config.DB.WithContext(ctx), OrderInput{LivestreamID: &liveID}, sellerID, false)
+	if err != nil {
+		if err.Error() == "shipping_pickup_required" {
+			return nil, nil
+		}
+		return nil, err
+	}
+	// A seller's home coordinates, phone and street are never public room data.
+	result := map[string]any{"province_name": address.ProvinceName, "mode": "seller_address"}
+	if address.StationID > 0 {
+		result["mode"] = "station_dropoff"
+		result["station_id"] = address.StationID
+		result["station_name"] = address.StationName
+		result["station_address"] = address.AddressLine
+	}
+	return result, nil
 }

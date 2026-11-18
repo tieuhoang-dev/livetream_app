@@ -12,8 +12,6 @@ import (
 	"path/filepath"
 	"time"
 
-	controllers "livesteam_app/controller/controller"
-
 	"livesteam_app/controller/services"
 
 	"github.com/gin-contrib/cors"
@@ -35,9 +33,8 @@ func main() {
 	}
 	cancelMigration()
 	config.EnsureMongoIndexes()
-	controllers.SetDatabase(config.DB)
 	config.ConnectRedis()
-	services.StartChatWorkers(50)
+	services.StartDirectChatWorkers(50)
 
 	if err != nil {
 		log.Fatal(err)

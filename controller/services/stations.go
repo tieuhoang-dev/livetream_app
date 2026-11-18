@@ -56,6 +56,7 @@ type NearbyStation struct {
 	PickupAddress  *models.DeliveryAddress `json:"pickup_address,omitempty"`
 }
 type NearbyStationResult struct {
+	Selected    *NearbyStation  `json:"selected,omitempty"`
 	Data        []NearbyStation `json:"data"`
 	District    string          `json:"district"`
 	Complete    bool            `json:"complete"`
@@ -159,6 +160,12 @@ func NearbyShippingStations(ctx context.Context, latitude, longitude float64, pr
 		}
 		return *a < *b
 	})
+	for i := range result.Data {
+		if result.Data[i].DistanceMeters != nil && result.Data[i].PickupAddress != nil {
+			result.Selected = &result.Data[i]
+			break
+		}
+	}
 	return result, nil
 }
 
@@ -186,6 +193,21 @@ func resolveStationPickup(ctx context.Context, provider shipping.Provider, input
 }
 
 func normalizePickup(ctx context.Context, input models.DeliveryAddress) (models.DeliveryAddress, error) {
+	if input.UseNearestStation {
+		if input.Latitude == nil || input.Longitude == nil {
+			return input, errors.New("invalid_coordinates")
+		}
+		nearby, err := NearbyShippingStations(ctx, *input.Latitude, *input.Longitude, input.CarrierProvinceID, input.CarrierDistrictID)
+		if err != nil {
+			return input, err
+		}
+		if nearby.Selected == nil {
+			return input, errors.New("shipping_station_unavailable")
+		}
+		chosen := *nearby.Selected.PickupAddress
+		chosen.Name, chosen.Phone = input.Name, input.Phone
+		return normalizeDelivery(chosen)
+	}
 	if input.StationID < 0 {
 		return input, errors.New("shipping_station_invalid")
 	}
