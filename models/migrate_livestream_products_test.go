@@ -150,8 +150,12 @@ func TestLivestreamProductReferenceMigration(t *testing.T) {
 			}
 
 			// This is the production startup path; repeat it to prove idempotence.
-			MigrateAll(db)
-			MigrateAll(db)
+			if err := MigrateAll(db); err != nil {
+				t.Fatal(err)
+			}
+			if err := MigrateAll(db); err != nil {
+				t.Fatal(err)
+			}
 			if !db.Migrator().HasColumn(&LivestreamProduct{}, "product_id") {
 				t.Fatal("canonical product_id is missing")
 			}

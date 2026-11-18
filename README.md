@@ -17,3 +17,11 @@ Windows có thể double-click **`start-dev.bat`**. Lệnh tự bật Redis còn
 Video dùng LiveKit Cloud với `LIVEKIT_URL`, `LIVEKIT_API_KEY` và `LIVEKIT_API_SECRET` trong `.env`. Để `LIVEKIT_API_URL` trống để backend tự suy ra địa chỉ HTTPS từ URL Cloud. Launcher không chạy LiveKit local.
 
 [Cấu hình cổng, dịch vụ đang chạy sẵn và xử lý lỗi](docs/development.md) · [API](API.md) · [Postman](postman/README.md)
+
+
+## Tổ chức backend
+
+`cmd/main.go` chỉ nhận Ctrl+C/SIGTERM và gọi `internal/app.Run`. Điểm ghép
+ứng dụng nằm trong [docs/architecture.md](docs/architecture.md); route được
+chia theo dịch vụ thay vì gom trong route user. Lệnh chạy vẫn là
+`go run ./cmd` hoặc `go run ./cmd/dev` như trước.

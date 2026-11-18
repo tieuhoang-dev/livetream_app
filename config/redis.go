@@ -11,8 +11,8 @@ import (
 
 var RedisClient *redis.Client
 
-func ConnectRedis() {
-	RedisClient = redis.NewClient(&redis.Options{
+func ConnectRedis(ctx context.Context) error {
+	client := redis.NewClient(&redis.Options{
 		// Read after main loads .env, rather than during package initialization.
 		Addr:     os.Getenv("REDIS_ADDR"),
 		Password: os.Getenv("REDIS_PASSWORD"),
@@ -21,11 +21,14 @@ func ConnectRedis() {
 		PoolSize: 100,
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if err := RedisClient.Ping(ctx).Err(); err != nil {
-		log.Fatalf("🔴 Redis connection failed: %v", err)
+	if err := client.Ping(ctx).Err(); err != nil {
+		client.Close()
+		return err
 	}
 
-	log.Println("🟢 Redis connected")
+	RedisClient = client
+	log.Println("Redis connected")
+	return nil
 }

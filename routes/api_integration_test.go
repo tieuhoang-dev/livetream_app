@@ -54,7 +54,9 @@ func TestConnectedAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	models.MigrateAll(db)
+	if err := models.MigrateAll(db); err != nil {
+		t.Fatal(err)
+	}
 	oldDB := config.DB
 	oldShipping := config.ShippingProvider
 	carrier := &quoteFixture{}
@@ -86,7 +88,9 @@ func TestConnectedAPI(t *testing.T) {
 			collection.Database().Drop(ctx)
 			client.Disconnect(ctx)
 		})
-		config.EnsureMongoIndexes()
+		if err := config.EnsureMongoIndexes(context.Background()); err != nil {
+			t.Fatal(err)
+		}
 	}
 	password := "Local-test-password-123"
 	hash, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
@@ -133,7 +137,7 @@ func TestConnectedAPI(t *testing.T) {
 	r.Use(gin.Recovery())
 	r.Static("/uploads", "./uploads")
 	oldRealtime := config.Realtime
-	routes.SetupUserRoutes(r)
+	routes.Setup(r)
 	hub := config.Realtime
 	t.Cleanup(func() { hub.Close(); config.Realtime = oldRealtime })
 	server := httptest.NewServer(r)
