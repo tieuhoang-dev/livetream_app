@@ -40,7 +40,7 @@ async function fakeBackend(t) {
 }
 
 test('loads every HTTP case and supports the matchers used by the collection', () => {
-  assert.equal(flattenCollection(collection).length, 106);
+  assert.equal(flattenCollection(collection).length, 104);
   expectValue('token').to.be.a('string').and.not.empty;
   expectValue([]).to.eql([]); expectValue({id: 1}).not.to.have.property('user');
   expectValue('012345').to.match(/^\d{6}$/); expectValue([1]).to.have.lengthOf(1);
@@ -217,3 +217,58 @@ for (const useDefault of [true, false]) {
     assert.deepEqual(backend.calls.map(c => c.path), ['/api/users/register', '/api/users/verify', '/api/users/login']);
   });
 }
+
+test('carrier fixture resolves numeric route IDs without any shipment request', async t => {
+  const folder = collection.item.find(item => item.item?.some(row => row.name.startsWith('SHIP-001')));
+  let received;
+  const server = http.createServer(async (req, res) => {
+    assert.equal(req.url, '/api/sales/shipping-settings');
+    let raw = ''; for await (const chunk of req) raw += chunk;
+    received = JSON.parse(raw);
+    res.writeHead(200, {'Content-Type': 'application/json'});
+    res.end(JSON.stringify({configured: true, settings: received}));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const runner = new TestRunner(collection, {workerFactory, requestInput: async () => { throw new Error('unexpected input'); }});
+  const report = await runner.start({...config, account_mode: 'existing', base_url: `http://127.0.0.1:${server.address().port}`, seller_token: 'fixture-token',
+    ghn_pickup_province_id: '1', ghn_pickup_district_id: '100', ghn_pickup_ward_code: '001'}, [folder.name]);
+  assert.equal(report.failed, 0);
+  assert.equal(report.passed, 1);
+  assert.equal(received.pickup_address.carrier_province_id, 1);
+  assert.equal(received.pickup_address.carrier_district_id, 100);
+  assert.equal(received.pickup_address.carrier_ward_code, '001');
+  assert.ok(!Object.hasOwn(received, 'same_province_fee'));
+});
+
+test('Studio authenticates once on the shared socket URL and correlates live commands', async () => {
+  const frames = [], instances = [];
+  class Socket extends EventTarget {
+    constructor(url) { super(); this.url = url; this.readyState = 0; instances.push(this); queueMicrotask(() => { this.readyState = 1; this.dispatchEvent(new Event('open')); }); }
+    send(raw) { const frame = JSON.parse(raw); frames.push(frame); queueMicrotask(() => this.dispatchEvent(new MessageEvent('message', {data: JSON.stringify({type:'result', request_id:frame.request_id, data:frame.type === 'authenticate' ? {user_id:'seller'} : {id:'live-fixture', status:frame.type === 'live.end' ? 'end' : 'start'}})}))); }
+    close() { this.readyState = 3; this.dispatchEvent(new Event('close')); }
+  }
+  const runner = new TestRunner({item:[]}, {webSocketFactory: url => new Socket(url)});
+  runner.env = {seller_token:'fixture-bearer'}; runner.backendUrl = 'http://localhost:8080';
+  const live = await runner.wsRequest('seller', {type:'live.create', payload:{title:'Fixture'}});
+  await runner.wsRequest('seller', {type:'live.end', payload:{livestream_id:live.id}});
+  assert.equal(instances.length, 1); assert.equal(instances[0].url, 'ws://localhost:8080/api/ws');
+  assert.deepEqual(frames.map(frame => frame.type), ['authenticate','live.create','live.end']);
+  assert.equal(frames[0].payload.token, 'fixture-bearer'); assert.equal(new Set(frames.map(frame => frame.request_id)).size, 3);
+  runner.stop();
+});
+
+test('stopping Studio closes a pending live command without resending it', async () => {
+  const frames = []; let reached;
+  const waiting = new Promise(resolve => { reached = resolve; });
+  class Socket extends EventTarget {
+    constructor() { super(); this.readyState = 0; queueMicrotask(() => { this.readyState = 1; this.dispatchEvent(new Event('open')); }); }
+    send(raw) { const frame = JSON.parse(raw); frames.push(frame); if (frame.type === 'authenticate') queueMicrotask(() => this.dispatchEvent(new MessageEvent('message', {data:JSON.stringify({type:'result', request_id:frame.request_id, data:{user_id:'seller'}})}))); else reached(); }
+    close() { this.readyState = 3; this.dispatchEvent(new Event('close')); }
+  }
+  const runner = new TestRunner({item:[]}, {webSocketFactory: () => new Socket()});
+  runner.env = {seller_token:'fixture'}; runner.backendUrl = 'http://localhost:8080';
+  const pending = runner.wsRequest('seller', {type:'live.create', payload:{title:'Fixture'}});
+  await waiting; runner.stop(); await assert.rejects(pending, /Đã dừng/);
+  assert.equal(frames.filter(frame => frame.type === 'live.create').length, 1);
+});

@@ -1,6 +1,8 @@
 package services
 
 import (
+	"context"
+	"github.com/google/uuid"
 	"strings"
 	"time"
 
@@ -49,8 +51,8 @@ func livestreamViewQuery(query *gorm.DB) *gorm.DB {
 		COALESCE(users.username, '') AS seller_username, COALESCE(users.avatar, '') AS seller_avatar`)
 }
 
-func ListLivestreams(input LivestreamQuery) ([]LivestreamView, int64, error) {
-	query := config.DB.Model(&models.Livestream{})
+func ListLivestreams(ctx context.Context, input LivestreamQuery) ([]LivestreamView, int64, error) {
+	query := config.DB.WithContext(ctx).Model(&models.Livestream{})
 	if input.Status != "all" {
 		query = query.Where("livestreams.status = ?", input.Status)
 	}
@@ -58,7 +60,7 @@ func ListLivestreams(input LivestreamQuery) ([]LivestreamView, int64, error) {
 		query = query.Where("livestreams.seller_id = ?", input.SellerID)
 	}
 	if input.ProductID != "" {
-		product := config.DB.Model(&models.LivestreamProduct{}).Select("1").
+		product := config.DB.WithContext(ctx).Model(&models.LivestreamProduct{}).Select("1").
 			Where("livestream_products.livestream_id = livestreams.id AND product_id = ?", input.ProductID)
 		query = query.Where("EXISTS (?)", product)
 	}
@@ -78,20 +80,21 @@ func ListLivestreams(input LivestreamQuery) ([]LivestreamView, int64, error) {
 	return items, total, err
 }
 
-func GetLivestream(id string) (*LivestreamView, error) {
+func GetLivestream(ctx context.Context, id string) (*LivestreamView, error) {
 	var live LivestreamView
-	query := config.DB.Model(&models.Livestream{}).Where("livestreams.id = ?", id)
+	query := config.DB.WithContext(ctx).Model(&models.Livestream{}).Where("livestreams.id = ?", id)
 	if err := livestreamViewQuery(query).Take(&live).Error; err != nil {
 		return nil, lookupError(err, "livestream_not_found")
 	}
 	return &live, nil
 }
 
-func ListLivestreamProducts(id string, page Pagination) ([]LivestreamProductView, int64, error) {
-	if err := config.DB.Select("id").Take(&models.Livestream{}, "id = ?", id).Error; err != nil {
+func ListLivestreamProducts(ctx context.Context, id string, page Pagination) ([]LivestreamProductView, int64, error) {
+	if err := config.DB.WithContext(ctx).Select("id").Take(&models.Livestream{}, "id = ?", id).Error; err != nil {
 		return nil, 0, lookupError(err, "livestream_not_found")
 	}
-	query := config.DB.Model(&models.LivestreamProduct{}).Where("livestream_id = ?", id)
+	query := config.DB.WithContext(ctx).Model(&models.LivestreamProduct{}).Where("livestream_id = ? AND status <> ?", id, removedLivestreamProduct).
+		Where("EXISTS (?)", config.DB.WithContext(ctx).Model(&models.Product{}).Select("1").Where("products.id = livestream_products.product_id"))
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -101,4 +104,17 @@ func ListLivestreamProducts(id string, page Pagination) ([]LivestreamProductView
 		description, price_at_purchase AS original_price, discount_price, stock_quantity, is_pinned`).
 		Order("is_pinned DESC, id ASC").Offset(page.Offset()).Limit(page.PageSize).Find(&items).Error
 	return items, total, err
+}
+
+func CreateLivestream(ctx context.Context, userID, title string) (*models.Livestream, error) {
+	live := &models.Livestream{ID: uuid.NewString(), SellerID: userID, Title: title, Status: "start"}
+	// CreatedAt is not the live start time in the legacy schema.
+	live.StartedAt = time.Now()
+	deadline := live.StartedAt.Add(LiveSignalGrace)
+	live.SignalExpiresAt = &deadline
+	if err := config.DB.WithContext(ctx).Create(live).Error; err != nil {
+		return nil, err
+	}
+	liveChanged(live.ID)
+	return live, nil
 }

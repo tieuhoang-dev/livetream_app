@@ -199,6 +199,42 @@
       "value": "",
       "enabled": true,
       "type": "secret"
+    },
+    {
+      "key": "ghn_pickup_province_id",
+      "value": "0",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "ghn_pickup_district_id",
+      "value": "0",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "ghn_pickup_ward_code",
+      "value": "",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "ghn_delivery_province_id",
+      "value": "0",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "ghn_delivery_district_id",
+      "value": "0",
+      "type": "default",
+      "enabled": true
+    },
+    {
+      "key": "ghn_delivery_ward_code",
+      "value": "",
+      "type": "default",
+      "enabled": true
     }
   ],
   "_postman_variable_scope": "environment"

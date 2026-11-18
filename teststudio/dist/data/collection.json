@@ -324,7 +324,7 @@
       "name": "01b - Giao hàng (tài khoản test)",
       "item": [
         {
-          "name": "SHIP-001 | Cấu hình địa chỉ lấy hàng và phí test bằng 0",
+          "name": "SHIP-001 | Cấu hình nơi lấy hàng cho báo phí GHN",
           "request": {
             "method": "PUT",
             "auth": {
@@ -346,7 +346,7 @@
             "url": "{{base_url}}/api/sales/shipping-settings",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"pickup_address\": {\n    \"name\": \"Postman Test Shop\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"34 Đường shop\",\n    \"latitude\": null,\n    \"longitude\": null\n  },\n  \"same_province_fee\": 0,\n  \"other_province_fee\": 0,\n  \"free_shipping_from\": null\n}",
+              "raw": "{\n  \"pickup_address\": {\n    \"name\": \"Postman Test Shop\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"34 Đường shop\",\n    \"latitude\": null,\n    \"longitude\": null,\n    \"carrier_province_id\": {{ghn_pickup_province_id}},\n    \"carrier_district_id\": {{ghn_pickup_district_id}},\n    \"carrier_ward_code\": \"{{ghn_pickup_ward_code}}\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -480,63 +480,6 @@
                   "if (pm.response.code === 200) {",
                   "  pm.environment.set(\"buyer_token\", __livestreamBody.token);",
                   "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "AUTO-003 | WebSocket thiếu JWT",
-          "request": {
-            "method": "GET",
-            "auth": {
-              "type": "noauth"
-            },
-            "header": [],
-            "url": "{{base_url}}/api/auth/ws",
-            "description": "WebSocket thiếu JWT"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"AUTO-003: HTTP 401\", function () { pm.response.to.have.status(401); });",
-                  "const __livestreamBody = pm.response.json();",
-                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"Authorization token missing\"); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "AUTO-004 | WebSocket JWT sai",
-          "request": {
-            "method": "GET",
-            "auth": {
-              "type": "bearer",
-              "bearer": [
-                {
-                  "key": "token",
-                  "value": "invalid-token",
-                  "type": "string"
-                }
-              ]
-            },
-            "header": [],
-            "url": "{{base_url}}/api/auth/ws",
-            "description": "WebSocket JWT sai"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"AUTO-004: HTTP 401\", function () { pm.response.to.have.status(401); });",
-                  "const __livestreamBody = pm.response.json();",
-                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"Invalid token\"); });"
                 ]
               }
             }
@@ -786,7 +729,7 @@
             "description": "Tạo sản phẩm seller: giá 100000, kho 30",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"{{product_name}}\",\n  \"price\": 100000,\n  \"stock_quantity\": 30,\n  \"description\": \"Postman regression\"\n}",
+              "raw": "{\n  \"name\": \"{{product_name}}\",\n  \"price\": 100000,\n  \"stock_quantity\": 30,\n  \"description\": \"Postman regression\",\n  \"parcel\": {\n    \"weight_grams\": 500,\n    \"length_cm\": 20,\n    \"width_cm\": 15,\n    \"height_cm\": 10\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -847,7 +790,7 @@
             "description": "Tạo sản phẩm của buyer",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"PM_foreign_{{run_id}}\",\n  \"price\": 20000,\n  \"stock_quantity\": 2\n}",
+              "raw": "{\n  \"name\": \"PM_foreign_{{run_id}}\",\n  \"price\": 20000,\n  \"stock_quantity\": 2,\n  \"parcel\": {\n    \"weight_grams\": 500,\n    \"length_cm\": 20,\n    \"width_cm\": 15,\n    \"height_cm\": 10\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -905,7 +848,7 @@
             "description": "Tạo sản phẩm riêng để sửa/xóa",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"PM_disposable_{{run_id}}\",\n  \"price\": 25,\n  \"stock_quantity\": 0,\n  \"image_url\": \"https://example.com/product.png\",\n  \"description\": \"Clear me\"\n}",
+              "raw": "{\n  \"name\": \"PM_disposable_{{run_id}}\",\n  \"price\": 25,\n  \"stock_quantity\": 0,\n  \"image_url\": \"https://example.com/product.png\",\n  \"description\": \"Clear me\",\n  \"parcel\": {\n    \"weight_grams\": 500,\n    \"length_cm\": 20,\n    \"width_cm\": 15,\n    \"height_cm\": 10\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1729,7 +1672,7 @@
             "description": "Create input sai: {\"name\": \"X\", \"price\": -1, \"stock_quantity\": 1}",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"X\",\n  \"price\": -1,\n  \"stock_quantity\": 1\n}",
+              "raw": "{\n  \"name\": \"X\",\n  \"price\": -1,\n  \"stock_quantity\": 1,\n  \"parcel\": {\n    \"weight_grams\": 500,\n    \"length_cm\": 20,\n    \"width_cm\": 15,\n    \"height_cm\": 10\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1783,7 +1726,7 @@
             "description": "Create input sai: {\"name\": \"X\", \"price\": 100000000, \"stock_quantity\": 1}",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"X\",\n  \"price\": 100000000,\n  \"stock_quantity\": 1\n}",
+              "raw": "{\n  \"name\": \"X\",\n  \"price\": 100000000,\n  \"stock_quantity\": 1,\n  \"parcel\": {\n    \"weight_grams\": 500,\n    \"length_cm\": 20,\n    \"width_cm\": 15,\n    \"height_cm\": 10\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1837,7 +1780,7 @@
             "description": "Create input sai: {\"name\": \"X\", \"price\": 1, \"stock_quantity\": -1}",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"X\",\n  \"price\": 1,\n  \"stock_quantity\": -1\n}",
+              "raw": "{\n  \"name\": \"X\",\n  \"price\": 1,\n  \"stock_quantity\": -1,\n  \"parcel\": {\n    \"weight_grams\": 500,\n    \"length_cm\": 20,\n    \"width_cm\": 15,\n    \"height_cm\": 10\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2238,7 +2181,7 @@
             "description": "Đơn input sai / thiếu kho / không có sản phẩm",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"quantity\": -1,\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null\n  }\n}",
+              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"quantity\": -1,\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null,\n    \"carrier_province_id\": {{ghn_delivery_province_id}},\n    \"carrier_district_id\": {{ghn_delivery_district_id}},\n    \"carrier_ward_code\": \"{{ghn_delivery_ward_code}}\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2292,7 +2235,7 @@
             "description": "Đơn input sai / thiếu kho / không có sản phẩm",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"quantity\": 99999,\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null\n  }\n}",
+              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"quantity\": 99999,\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null,\n    \"carrier_province_id\": {{ghn_delivery_province_id}},\n    \"carrier_district_id\": {{ghn_delivery_district_id}},\n    \"carrier_ward_code\": \"{{ghn_delivery_ward_code}}\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2347,7 +2290,7 @@
             "description": "Đơn input sai / thiếu kho / không có sản phẩm",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"product_id\": \"{{missing_id}}\",\n  \"quantity\": 1,\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null\n  }\n}",
+              "raw": "{\n  \"product_id\": \"{{missing_id}}\",\n  \"quantity\": 1,\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null,\n    \"carrier_province_id\": {{ghn_delivery_province_id}},\n    \"carrier_district_id\": {{ghn_delivery_district_id}},\n    \"carrier_ward_code\": \"{{ghn_delivery_ward_code}}\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2402,7 +2345,7 @@
             "description": "Buyer mua 2 sản phẩm",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"quantity\": 2,\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null\n  }\n}",
+              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"quantity\": 2,\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null,\n    \"carrier_province_id\": {{ghn_delivery_province_id}},\n    \"carrier_district_id\": {{ghn_delivery_district_id}},\n    \"carrier_ward_code\": \"{{ghn_delivery_ward_code}}\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2427,7 +2370,8 @@
                 "exec": [
                   "pm.test(\"AUTO-046: HTTP 201\", function () { pm.response.to.have.status(201); });",
                   "const __livestreamBody = pm.response.json();",
-                  "pm.test(\"total_amount \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"total_amount\"]).to.eql(200000));",
+                  "pm.test(\"total_amount \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"total_amount\"]).to.eql(200000 + __livestreamBody.shipping_fee));",
+                  "pm.test(\"Carrier fee is present\", () => pm.expect(__livestreamBody.shipping_fee).to.be.a(\"number\"));",
                   "pm.test(\"status \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"status\"]).to.eql(\"pending\"));",
                   "if (pm.response.code === 201) {",
                   "  pm.environment.set(\"order_id\", __livestreamBody.order_id);",
@@ -2678,9 +2622,9 @@
           ]
         },
         {
-          "name": "AUTO-052 | Không xóa sản phẩm đang có đơn",
+          "name": "AUTO-052 | Đọc sản phẩm khi đang có đơn",
           "request": {
-            "method": "DELETE",
+            "method": "GET",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -2693,7 +2637,7 @@
             },
             "header": [],
             "url": "{{base_url}}/api/products/{{product_id}}",
-            "description": "Không xóa sản phẩm đang có đơn"
+            "description": "Đọc sản phẩm khi đang có đơn. Không archive fixture giữa chuỗi đặt hàng; xem kiểm thử xóa mềm riêng trong WEBSOCKET_TEST_CASES.md."
           },
           "event": [
             {
@@ -2710,9 +2654,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"AUTO-052: HTTP 409\", function () { pm.response.to.have.status(409); });",
-                  "const __livestreamBody = pm.response.json();",
-                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"product_in_use\"); });"
+                  "pm.test(\"HTTP status 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Sản phẩm vẫn đọc được\", function () { pm.expect(body.id).to.be.a(\"string\"); });"
                 ]
               }
             }
@@ -3037,7 +2981,7 @@
             "description": "Tạo đơn thứ hai để cancel",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"quantity\": 3,\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null\n  }\n}",
+              "raw": "{\n  \"product_id\": \"{{product_id}}\",\n  \"quantity\": 3,\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null,\n    \"carrier_province_id\": {{ghn_delivery_province_id}},\n    \"carrier_district_id\": {{ghn_delivery_district_id}},\n    \"carrier_ward_code\": \"{{ghn_delivery_ward_code}}\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3062,7 +3006,8 @@
                 "exec": [
                   "pm.test(\"AUTO-059: HTTP 201\", function () { pm.response.to.have.status(201); });",
                   "const __livestreamBody = pm.response.json();",
-                  "pm.test(\"total_amount \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"total_amount\"]).to.eql(300000));",
+                  "pm.test(\"total_amount \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"total_amount\"]).to.eql(300000 + __livestreamBody.shipping_fee));",
+                  "pm.test(\"Carrier fee is present\", () => pm.expect(__livestreamBody.shipping_fee).to.be.a(\"number\"));",
                   "if (pm.response.code === 201) {",
                   "  pm.environment.set(\"cancel_order_id\", __livestreamBody.order_id);",
                   "}"
@@ -3243,9 +3188,9 @@
           ]
         },
         {
-          "name": "AUTO-064 | Giữ sản phẩm có lịch sử đơn đã hoàn/hủy",
+          "name": "AUTO-064 | Đọc sản phẩm có lịch sử đơn hoàn/hủy",
           "request": {
-            "method": "DELETE",
+            "method": "GET",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3258,7 +3203,7 @@
             },
             "header": [],
             "url": "{{base_url}}/api/products/{{product_id}}",
-            "description": "Giữ sản phẩm có lịch sử đơn đã hoàn/hủy"
+            "description": "Đọc sản phẩm có lịch sử đơn hoàn/hủy. Không archive fixture giữa chuỗi đặt hàng; xem kiểm thử xóa mềm riêng trong WEBSOCKET_TEST_CASES.md."
           },
           "event": [
             {
@@ -3275,9 +3220,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"AUTO-064: HTTP 409\", function () { pm.response.to.have.status(409); });",
-                  "const __livestreamBody = pm.response.json();",
-                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"product_in_use\"); });"
+                  "pm.test(\"HTTP status 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Sản phẩm vẫn đọc được\", function () { pm.expect(body.id).to.be.a(\"string\"); });"
                 ]
               }
             }
@@ -3568,7 +3513,7 @@
     },
     {
       "name": "04 - San pham live (can live_id)",
-      "description": "Dùng WebSocket seller gửi create_live, copy id vào live_id trước khi chạy. Không dùng product_id của folder 02; folder này tự tạo sản phẩm riêng.",
+      "description": "Dùng WebSocket seller gửi live.create, copy id vào live_id trước khi chạy. Không dùng product_id của folder 02; folder này tự tạo sản phẩm riêng.",
       "item": [
         {
           "name": "LIVE-001 | Tạo sản phẩm riêng cho live",
@@ -3594,7 +3539,7 @@
             "description": "Tạo sản phẩm riêng cho live",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"PM_live_{{run_id}}\",\n  \"price\": 100000,\n  \"stock_quantity\": 20\n}",
+              "raw": "{\n  \"name\": \"PM_live_{{run_id}}\",\n  \"price\": 100000,\n  \"stock_quantity\": 20,\n  \"parcel\": {\n    \"weight_grams\": 500,\n    \"length_cm\": 20,\n    \"width_cm\": 15,\n    \"height_cm\": 10\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3652,7 +3597,7 @@
             "description": "Tạo sản phẩm buyer để thử gắn trái quyền",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"PM_foreign_live_{{run_id}}\",\n  \"price\": 10000,\n  \"stock_quantity\": 2\n}",
+              "raw": "{\n  \"name\": \"PM_foreign_live_{{run_id}}\",\n  \"price\": 10000,\n  \"stock_quantity\": 2,\n  \"parcel\": {\n    \"weight_grams\": 500,\n    \"length_cm\": 20,\n    \"width_cm\": 15,\n    \"height_cm\": 10\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3940,9 +3885,9 @@
           ]
         },
         {
-          "name": "LIVE-008 | Không xóa sản phẩm gốc đang trong live",
+          "name": "LIVE-008 | Đọc sản phẩm gốc đang trong live",
           "request": {
-            "method": "DELETE",
+            "method": "GET",
             "auth": {
               "type": "bearer",
               "bearer": [
@@ -3955,7 +3900,7 @@
             },
             "header": [],
             "url": "{{base_url}}/api/products/{{live_product_id}}",
-            "description": "Không xóa sản phẩm gốc đang trong live"
+            "description": "Đọc sản phẩm gốc đang trong live. Không archive fixture giữa chuỗi đặt hàng; xem kiểm thử xóa mềm riêng trong WEBSOCKET_TEST_CASES.md."
           },
           "event": [
             {
@@ -3972,9 +3917,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"LIVE-008: HTTP 409\", function () { pm.response.to.have.status(409); });",
-                  "const __livestreamBody = pm.response.json();",
-                  "pm.test(\"Mã lỗi đúng\", function () { pm.expect(__livestreamBody.error).to.eql(\"product_in_use\"); });"
+                  "pm.test(\"HTTP status 200\", function () { pm.response.to.have.status(200); });",
+                  "const body = pm.response.json();",
+                  "pm.test(\"Sản phẩm vẫn đọc được\", function () { pm.expect(body.id).to.be.a(\"string\"); });"
                 ]
               }
             }
@@ -4004,7 +3949,7 @@
             "description": "Mua live 2 sản phẩm theo giá 80000",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"product_id\": \"{{live_product_id}}\",\n  \"quantity\": 2,\n  \"livestream_id\": \"{{live_id}}\",\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null\n  }\n}",
+              "raw": "{\n  \"product_id\": \"{{live_product_id}}\",\n  \"quantity\": 2,\n  \"livestream_id\": \"{{live_id}}\",\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null,\n    \"carrier_province_id\": {{ghn_delivery_province_id}},\n    \"carrier_district_id\": {{ghn_delivery_district_id}},\n    \"carrier_ward_code\": \"{{ghn_delivery_ward_code}}\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4029,7 +3974,8 @@
                 "exec": [
                   "pm.test(\"LIVE-009: HTTP 201\", function () { pm.response.to.have.status(201); });",
                   "const __livestreamBody = pm.response.json();",
-                  "pm.test(\"total_amount \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"total_amount\"]).to.eql(160000));",
+                  "pm.test(\"total_amount \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"total_amount\"]).to.eql(160000 + __livestreamBody.shipping_fee));",
+                  "pm.test(\"Carrier fee is present\", () => pm.expect(__livestreamBody.shipping_fee).to.be.a(\"number\"));",
                   "if (pm.response.code === 201) {",
                   "  pm.environment.set(\"live_order_id\", __livestreamBody.order_id);",
                   "}"
@@ -4144,7 +4090,7 @@
             "description": "Tạo đơn live thứ hai để pay/refund",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"product_id\": \"{{live_product_id}}\",\n  \"quantity\": 3,\n  \"livestream_id\": \"{{live_id}}\",\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null\n  }\n}",
+              "raw": "{\n  \"product_id\": \"{{live_product_id}}\",\n  \"quantity\": 3,\n  \"livestream_id\": \"{{live_id}}\",\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null,\n    \"carrier_province_id\": {{ghn_delivery_province_id}},\n    \"carrier_district_id\": {{ghn_delivery_district_id}},\n    \"carrier_ward_code\": \"{{ghn_delivery_ward_code}}\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -4169,7 +4115,8 @@
                 "exec": [
                   "pm.test(\"LIVE-012: HTTP 201\", function () { pm.response.to.have.status(201); });",
                   "const __livestreamBody = pm.response.json();",
-                  "pm.test(\"total_amount \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"total_amount\"]).to.eql(240000));",
+                  "pm.test(\"total_amount \\u0111\\u00fang\", () => pm.expect(__livestreamBody[\"total_amount\"]).to.eql(240000 + __livestreamBody.shipping_fee));",
+                  "pm.test(\"Carrier fee is present\", () => pm.expect(__livestreamBody.shipping_fee).to.be.a(\"number\"));",
                   "if (pm.response.code === 201) {",
                   "  pm.environment.set(\"live_paid_order_id\", __livestreamBody.order_id);",
                   "}"
@@ -4445,7 +4392,7 @@
     },
     {
       "name": "05 - Live da ket thuc (can ended_live_id)",
-      "description": "Sau folder 04, end_live bằng WebSocket seller; copy ID đó vào ended_live_id. Chạy folder này để kiểm tra HTTP bị chặn đúng trạng thái.",
+      "description": "Sau folder 04, live.end bằng WebSocket seller; copy ID đó vào ended_live_id. Chạy folder này để kiểm tra HTTP bị chặn đúng trạng thái.",
       "item": [
         {
           "name": "END-001 | Không thêm sản phẩm vào live đã kết thúc",
@@ -4526,7 +4473,7 @@
             "description": "Không đặt hàng live đã kết thúc",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"product_id\": \"{{live_product_id}}\",\n  \"livestream_id\": \"{{ended_live_id}}\",\n  \"quantity\": 1,\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null\n  }\n}",
+              "raw": "{\n  \"product_id\": \"{{live_product_id}}\",\n  \"livestream_id\": \"{{ended_live_id}}\",\n  \"quantity\": 1,\n  \"payment_method\": \"manual\",\n  \"delivery\": {\n    \"name\": \"Postman Test Buyer\",\n    \"phone\": \"0901234567\",\n    \"province_code\": \"1\",\n    \"ward\": \"Phường thử nghiệm\",\n    \"address_line\": \"12 Đường thử nghiệm\",\n    \"latitude\": null,\n    \"longitude\": null,\n    \"carrier_province_id\": {{ghn_delivery_province_id}},\n    \"carrier_district_id\": {{ghn_delivery_district_id}},\n    \"carrier_ward_code\": \"{{ghn_delivery_ward_code}}\"\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"

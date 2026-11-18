@@ -29,7 +29,7 @@ func CreateLiveMediaSession(c *gin.Context) {
 	c.JSON(http.StatusOK, session)
 }
 
-// Ending over HTTP avoids replacing an existing application WebSocket connection.
+// Compatibility endpoint; application realtime commands share the same service.
 func EndLive(c *gin.Context) {
 	userID, ok := currentUserID(c)
 	if !ok || !validID(c, "livestream_id") {
@@ -40,6 +40,5 @@ func EndLive(c *gin.Context) {
 		writeServiceError(c, err)
 		return
 	}
-	notifyLivestreamsChanged()
 	c.JSON(http.StatusOK, gin.H{"id": live.ID, "title": live.Title, "status": live.Status, "ended_at": live.EndedAt, "media_closed": mediaClosed})
 }

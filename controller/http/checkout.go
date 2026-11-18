@@ -45,16 +45,13 @@ func SaveShippingSettings(c *gin.Context) {
 		return
 	}
 	var input struct {
-		Pickup           models.DeliveryAddress `json:"pickup_address"`
-		SameProvinceFee  *float64               `json:"same_province_fee"`
-		OtherProvinceFee *float64               `json:"other_province_fee"`
-		FreeShippingFrom *float64               `json:"free_shipping_from"`
+		Pickup models.DeliveryAddress `json:"pickup_address"`
 	}
-	if err := c.ShouldBindJSON(&input); err != nil || input.SameProvinceFee == nil || input.OtherProvinceFee == nil {
+	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_shipping_settings"})
 		return
 	}
-	settings, err := services.SaveShippingSettings(c.Request.Context(), uid, models.ShippingSettings{Pickup: input.Pickup, SameProvinceFee: *input.SameProvinceFee, OtherProvinceFee: *input.OtherProvinceFee, FreeShippingFrom: input.FreeShippingFrom})
+	settings, err := services.SaveShippingSettings(c.Request.Context(), uid, models.ShippingSettings{Pickup: input.Pickup})
 	if err != nil {
 		writeServiceError(c, err)
 		return

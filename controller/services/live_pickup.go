@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"errors"
-	"time"
 
 	"livesteam_app/config"
 	"livesteam_app/models"
@@ -11,29 +10,6 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
-
-type ShippingRatesInput struct {
-	SameProvinceFee  *float64 `json:"same_province_fee"`
-	OtherProvinceFee *float64 `json:"other_province_fee"`
-	FreeShippingFrom *float64 `json:"free_shipping_from"`
-}
-
-func (rates *ShippingRatesInput) validate() error {
-	if rates.SameProvinceFee == nil || rates.OtherProvinceFee == nil {
-		return errors.New("invalid_shipping_settings")
-	}
-	for _, value := range []float64{*rates.SameProvinceFee, *rates.OtherProvinceFee} {
-		if _, err := moneyCents(value); err != nil {
-			return errors.New("invalid_shipping_settings")
-		}
-	}
-	if rates.FreeShippingFrom != nil {
-		if cents, err := moneyCents(*rates.FreeShippingFrom); err != nil || cents <= 0 {
-			return errors.New("invalid_shipping_settings")
-		}
-	}
-	return nil
-}
 
 func GetLivePickup(ctx context.Context, userID, liveID string) (*models.DeliveryAddress, error) {
 	db := config.DB.WithContext(ctx)
@@ -59,15 +35,10 @@ func GetLivePickup(ctx context.Context, userID, liveID string) (*models.Delivery
 	return &settings.Pickup, nil
 }
 
-func SaveLivePickup(ctx context.Context, userID, liveID string, input models.DeliveryAddress, rates *ShippingRatesInput) (*models.DeliveryAddress, error) {
-	address, err := normalizeDelivery(input)
+func SaveLivePickup(ctx context.Context, userID, liveID string, input models.DeliveryAddress) (*models.DeliveryAddress, error) {
+	address, err := normalizePickup(ctx, input)
 	if err != nil {
 		return nil, err
-	}
-	if rates != nil {
-		if err := rates.validate(); err != nil {
-			return nil, err
-		}
 	}
 	err = config.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		live, err := ownedLivestream(tx, userID, liveID)
@@ -83,25 +54,35 @@ func SaveLivePickup(ctx context.Context, userID, liveID string, input models.Del
 			return err
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			if rates == nil {
-				return errors.New("shipping_not_configured")
-			}
-			// A first-time seller configures shipping at broadcast start. Use the
-			// confirmed live address as the initial shop origin, without defaults.
-			settings = models.ShippingSettings{SellerID: userID, Pickup: address,
-				SameProvinceFee: *rates.SameProvinceFee, OtherProvinceFee: *rates.OtherProvinceFee, FreeShippingFrom: rates.FreeShippingFrom}
+			settings = models.ShippingSettings{SellerID: userID, Pickup: address}
 			if err := tx.Create(&settings).Error; err != nil {
-				return err
-			}
-		} else if rates != nil {
-			if err := tx.Model(&settings).Updates(map[string]interface{}{
-				"same_province_fee": *rates.SameProvinceFee, "other_province_fee": *rates.OtherProvinceFee,
-				"free_shipping_from": rates.FreeShippingFrom, "updated_at": time.Now(),
-			}).Error; err != nil {
 				return err
 			}
 		}
 		return tx.Save(&models.LivestreamPickup{LivestreamID: liveID, Address: address}).Error
 	})
+	if err == nil {
+		liveChanged(liveID)
+		shippingChanged(liveID)
+	}
 	return &address, err
+}
+
+func PublicLiveOrigin(ctx context.Context, liveID, sellerID string) (any, error) {
+	address, err := checkoutPickup(config.DB.WithContext(ctx), OrderInput{LivestreamID: &liveID}, sellerID, false)
+	if err != nil {
+		if err.Error() == "shipping_pickup_required" {
+			return nil, nil
+		}
+		return nil, err
+	}
+	// A seller's home coordinates, phone and street are never public room data.
+	result := map[string]any{"province_name": address.ProvinceName, "mode": "seller_address"}
+	if address.StationID > 0 {
+		result["mode"] = "station_dropoff"
+		result["station_id"] = address.StationID
+		result["station_name"] = address.StationName
+		result["station_address"] = address.AddressLine
+	}
+	return result, nil
 }

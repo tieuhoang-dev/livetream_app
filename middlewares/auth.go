@@ -1,108 +1,82 @@
 package middlewares
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"os"
 	"strings"
-
-	"livesteam_app/config"
-	"livesteam_app/models"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"livesteam_app/config"
+	"livesteam_app/models"
 )
 
 var ErrNoJWTSecret = errors.New("JWT_SECRET not set")
 
-func getJWTSecret() ([]byte, error) {
-	s := os.Getenv("JWT_SECRET")
-	if s == "" {
-		return nil, ErrNoJWTSecret
+// Authenticate is shared by bearer HTTP requests and the WebSocket auth frame.
+func Authenticate(ctx context.Context, tokenString string) (*models.User, time.Time, error) {
+	if config.DB == nil {
+		return nil, time.Time{}, errors.New("Database not initialized")
 	}
-	return []byte(s), nil
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		return nil, time.Time{}, ErrNoJWTSecret
+	}
+	token, err := jwt.Parse(tokenString, func(*jwt.Token) (any, error) { return []byte(secret), nil }, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired())
+	if err != nil || !token.Valid {
+		return nil, time.Time{}, errors.New("Invalid token")
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, time.Time{}, errors.New("Invalid token claims")
+	}
+	userID, _ := claims["user_id"].(string)
+	id, err := uuid.Parse(userID)
+	if err != nil || id == uuid.Nil {
+		return nil, time.Time{}, errors.New("Invalid user ID in token")
+	}
+	expiry, err := claims.GetExpirationTime()
+	if err != nil || expiry == nil {
+		return nil, time.Time{}, errors.New("Invalid token")
+	}
+	var user models.User
+	if err := config.DB.WithContext(ctx).First(&user, "id = ?", id.String()).Error; err != nil {
+		return nil, time.Time{}, errors.New("User not found")
+	}
+	if !user.IsVerified {
+		return nil, time.Time{}, errors.New("User not verified")
+	}
+	if user.Status != "active" {
+		return nil, time.Time{}, errors.New("User is not active")
+	}
+	return &user, expiry.Time, nil
 }
-
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if config.DB == nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Database not initialized"})
-			return
+		token := strings.TrimPrefix(c.GetHeader("Authorization"), "Bearer ")
+		if token == "" {
+			token = c.Query("token")
 		}
-
-		var tokenString string
-
-		authHeader := c.GetHeader("Authorization")
-		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
-			tokenString = strings.TrimPrefix(authHeader, "Bearer ")
-		}
-
-		if tokenString == "" {
-			tokenString = c.Query("token")
-		}
-
-		if tokenString == "" {
+		if token == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authorization token missing"})
 			return
 		}
-
-		secretKey, err := getJWTSecret()
+		user, _, err := Authenticate(c.Request.Context(), token)
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "JWT secret not set"})
-			return
-		}
-
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, errors.New("unexpected signing method")
+			status := http.StatusUnauthorized
+			if errors.Is(err, ErrNoJWTSecret) {
+				status = 500
 			}
-			return secretKey, nil
-		})
-
-		if err != nil || !token.Valid {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+			c.AbortWithStatusJSON(status, gin.H{"error": err.Error()})
 			return
 		}
-
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
-			return
-		}
-
-		userIDStr, ok := claims["user_id"].(string)
-		if !ok {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid user ID in token"})
-			return
-		}
-
-		userID, err := uuid.Parse(userIDStr)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid UUID format"})
-			return
-		}
-
-		var user models.User
-		if err := config.DB.First(&user, "id = ?", userIDStr).Error; err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
-			return
-		}
-
-		if !user.IsVerified {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "User not verified"})
-			return
-		}
-
-		if user.Status != "active" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "User is not active"})
-			return
-		}
-
-		c.Set("userID", userID)
+		c.Set("userID", uuid.MustParse(user.ID))
 		c.Set("username", user.Username)
-		c.Set("user", user)
-
+		c.Set("user", *user)
 		c.Next()
 	}
 }

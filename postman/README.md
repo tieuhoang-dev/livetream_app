@@ -1,7 +1,7 @@
 # Test Livestream App bằng Postman
 
 Bộ test cho `tieuhoang-dev/livetream_app`, đã cập nhật hợp đồng checkout có địa chỉ và phí giao hàng.
-Gồm **106 request HTTP có assertion**, bảng test case CSV, file Environment,
+Gồm **104 request HTTP có assertion**, bảng test case CSV, file Environment,
 ảnh mẫu và hướng dẫn WebSocket riêng.
 
 Luồng chính cho tài khoản mới: **Đăng ký → lấy OTP → Verify thành công →
@@ -97,7 +97,7 @@ iteration và giữ thứ tự request. Bật tùy chọn giữ giá trị biế
 (Keep variable values/Persist variables, tùy phiên bản) nếu muốn dùng các token
 và ID này cho bước WebSocket tiếp theo.
 
-Folder có **66 request**, tự tạo `run_id` mới, đăng nhập hai tài khoản, lưu ID
+Folder có **64 request**, tự tạo `run_id` mới, đăng nhập hai tài khoản, lưu ID
 sản phẩm/đơn hàng, kiểm tra:
 
 - JWT thiếu/sai; quyền truy cập khi chưa đăng nhập.
@@ -136,17 +136,13 @@ Sau folder 02, chọn folder `03 - Avatar (chon file)`:
 Đọc `WEBSOCKET_TEST_CASES.md`. Collection JSON v2.1 này là **HTTP collection**;
 các message WebSocket cần mở bằng New → WebSocket Request trong Postman.
 
-1. Sau folder 02, mở hai kết nối WS theo URL seller/buyer trong tài liệu.
-2. Seller gửi `create_live`, copy `id` trả về vào Environment `live_id`.
-3. Buyer gửi `join_live`, mong đợi `join_live_success`.
-4. Chạy folder `04 - San pham live (can live_id)` (18 request): tạo sản phẩm
-   riêng, kiểm tra quyền, gắn/cấp kho live, mua theo giá giảm, cancel, pay/refund,
-   gỡ sản phẩm và kiểm tra kho gốc trở lại 20.
-5. Seller gửi `end_live` với `content` là `live_id`. Copy ID đó vào
-   `ended_live_id`.
-6. Buyer gửi `join_live` lại: phải nhận `join_live_error`.
-7. Chạy folder `05 - Live da ket thuc (can ended_live_id)` (2 request): chặn
-   gắn thêm sản phẩm và đặt hàng live đã kết thúc với 409.
+1. Mở `{{ws_url}}/api/ws` cho seller/buyer; gửi authenticate frame với token.
+2. Seller gửi live.create, copy response.data.id vào live_id.
+3. Buyer dùng live.subscribe để theo dõi trạng thái/sản phẩm/comment qua WS.
+4. Chạy folder 04 để kiểm tra các route HTTP tương thích về kho/đơn hàng.
+5. Seller gửi live.end với payload.livestream_id; copy ID vào ended_live_id.
+6. live.get/live.subscribe trả status=end; gửi comment/đặt hàng mới bị chặn.
+7. Chạy folder 05 để kiểm tra HTTP cũ vẫn chặn đúng trạng thái.
 
 Không có API HTTP tạo live, nên không gọi `POST /api/livestreams`.
 
@@ -207,24 +203,26 @@ Muốn chạy tiếp folder live/avatar bằng CLI, dùng `--export-environment`
 file xuất ở lần tiếp theo. File xuất chứa token/password của bạn, giữ riêng.
 
 `HTTP_TEST_CASES.csv` mở được bằng Excel/Google Sheets, gồm ID, điều kiện, body,
-HTTP status và mã lỗi mong đợi cho cả 106 request. `VALIDATION.md` ghi rõ những
+HTTP status và mã lỗi mong đợi cho cả 104 request. `VALIDATION.md` ghi rõ những
 folder đã chạy xác minh và các phần còn cần OTP thực.
 
 
-Checkout mới yêu cầu địa chỉ nhận và cấu hình giao hàng của shop. Chạy nhóm
-**01b - Giao hàng (tài khoản test)** sau đăng nhập/xác thực và trước HTTP tự động.
-SHIP-001 thiết lập địa chỉ shop và phí 0 cho fixture; không dùng tài khoản shop thật.
-Xem API.md mục Checkout để thử phí nội tỉnh/liên tỉnh khác 0.
+## Báo phí GHN — chỉ lấy phí, không gửi hàng
 
-Có thể thử tự điền địa chỉ bằng `POST {{base_url}}/api/delivery/reverse-geocode`
-với JWT và body `{"latitude":21.028511,"longitude":105.804817}`. Request này cần
-Internet/provider đang hoạt động; chưa nằm trong HTTP regression tự động.
-Trên trình duyệt, chọn Nhập địa chỉ hoặc Sử dụng vị trí hiện tại. Người bán
-xác nhận địa chỉ phiên ở bước Bắt đầu phát; GET/PUT `/api/livestreams/:id/pickup`
-chỉ dành cho chủ phiên. Địa chỉ `location_mode=current` phải có đủ tọa độ.
+Cập nhật backend và frontend cùng phiên bản. Xem [../SHIPPING.md](../SHIPPING.md)
+để cấu hình GHN_ENV=staging, GHN_TOKEN và GHN_SHOP_ID trên backend. Không nhập
+Token GHN vào Postman, Studio hay FE. Những đơn trong collection là đơn nội bộ;
+backend chỉ gọi danh mục/fee của GHN, không tạo vận đơn hay yêu cầu lấy hàng.
 
-Nếu shop đang live nhưng thiếu phí ship, chủ phiên có thể gửi PUT
-`/api/livestreams/{{live_id}}/pickup` với `pickup_address` đầy đủ và
-`shipping_rates` gồm cả `same_province_fee`, `other_province_fee` (xem API.md).
-Địa chỉ và phí lưu cùng transaction. Quote chỉ cần `delivery.province_code`;
-tạo đơn vẫn cần địa chỉ đầy đủ và payment_method.
+Trước nhóm HTTP tự động, lấy mã qua lệnh WS shipping.provinces, shipping.districts,
+wards (dùng JWT). Điền sáu biến môi trường sau bằng khu vực GHN phù hợp địa
+chỉ Hanoi của fixture: ghn_pickup_province_id, ghn_pickup_district_id,
+ghn_pickup_ward_code, ghn_delivery_province_id, ghn_delivery_district_id,
+ghn_delivery_ward_code. Giá trị 0/rỗng chỉ là chỗ trống, không phải mã hợp lệ.
+Có thể đổi địa chỉ fixture nếu chọn khu vực khác; province_code là mã tỉnh
+hiện tại của app, carrier_* là mã GHN, không hoán đổi hai loại mã này.
+
+SHIP-001 chỉ lưu nơi lấy hàng, không đặt phí 0. Các sản phẩm test có quy cách
+kiện cụ thể. Assertion tổng tiền cộng phí hãng trả về. Bản embedded đã đồng bộ,
+nhưng bộ real-API opt-in/Studio cần cung cấp các biến mã khu vực nói trên;
+những lần xác minh lịch sử trong VALIDATION.md dùng hợp đồng phí cũ.

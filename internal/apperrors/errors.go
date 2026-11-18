@@ -1,28 +1,30 @@
-package controllers
+package apperrors
 
 import (
+	"context"
+	"errors"
 	"net/http"
-
-	"livesteam_app/controller/services"
-
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
-func currentUserID(c *gin.Context) (string, bool) {
-	value, exists := c.Get("userID")
-	id, ok := value.(uuid.UUID)
-	if !exists || !ok || id == uuid.Nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return "", false
+// Public maps domain errors consistently for HTTP and WebSocket transports.
+func Public(err error) (int, string) {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return http.StatusGatewayTimeout, "request_timeout"
 	}
-	return id.String(), true
-}
 
-func writeServiceError(c *gin.Context, err error) {
 	status := http.StatusInternalServerError
 	message := err.Error()
 	switch message {
+	case "invalid_chat_message", "shipping_station_unavailable", "shipping_invalid_parcel", "shipping_address_required", "shipping_address_unavailable", "shipping_station_invalid":
+		status = http.StatusBadRequest
+	case "shipping_product_incomplete", "shipping_pickup_required", "shipping_pickup_area_required":
+		status = http.StatusConflict
+	case "shipping_provider_not_configured":
+		status = http.StatusServiceUnavailable
+	case "shipping_stations_access_required":
+		status = http.StatusServiceUnavailable
+	case "shipping_unavailable":
+		status = http.StatusBadGateway
 	case "user_not_found", "order_not_found", "payment_not_found", "product_not_found", "livestream_not_found", "product_not_found_in_livestream":
 		status = http.StatusNotFound
 	case "forbidden", "cannot_buy_own_product":
@@ -40,29 +42,5 @@ func writeServiceError(c *gin.Context, err error) {
 	default:
 		message = "Internal server error"
 	}
-	c.JSON(status, gin.H{"error": message})
-}
-
-func validID(c *gin.Context, name string) bool {
-	if id, err := uuid.Parse(c.Param(name)); err != nil || id == uuid.Nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid " + name})
-		return false
-	}
-	return true
-}
-
-func defaultPagination() services.Pagination {
-	return services.Pagination{Page: 1, PageSize: 20}
-}
-
-func bindListQuery(c *gin.Context, query interface{}) bool {
-	if err := c.ShouldBindQuery(query); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_query"})
-		return false
-	}
-	return true
-}
-
-func writePage[T any](c *gin.Context, page services.Pagination, items []T, total int64) {
-	c.JSON(http.StatusOK, gin.H{"data": items, "total": total, "page": page.Page, "page_size": page.PageSize})
+	return status, message
 }

@@ -94,7 +94,6 @@ func AddProductToLivestream(c *gin.Context) {
 		writeServiceError(c, err)
 		return
 	}
-	notifyLivestreamsChanged()
 	c.JSON(http.StatusCreated, gin.H{"message": "Product added to livestream"})
 }
 
@@ -107,6 +106,5 @@ func RemoveProductFromLivestream(c *gin.Context) {
 		writeServiceError(c, err)
 		return
 	}
-	notifyLivestreamsChanged()
 	c.Status(http.StatusNoContent)
 }

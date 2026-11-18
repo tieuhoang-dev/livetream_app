@@ -2,13 +2,10 @@
 
 Base URL khi chạy local: `http://localhost:8080`.
 
-Danh sách live trên FE dùng WebSocket công khai `/api/livestreams/ws` theo
-hợp đồng bên dưới. REST danh sách được giữ để tương thích client cũ.
-
-Các route được bảo vệ nhận header `Authorization: Bearer <JWT>` từ API login.
-User phải được xác thực email và có trạng thái `active`. User ID luôn lấy từ JWT,
-không lấy từ request body. WebSocket vẫn giữ route `/api/auth/ws` và hỗ trợ
-`?token=<JWT>` như trước.
+Realtime dùng duy nhất `/api/ws`; xem [REALTIME.md](REALTIME.md) cho protocol,
+quyền và ví dụ. HTTP bên dưới dùng `Authorization: Bearer <JWT>` ở route bảo vệ.
+User phải verified/active; không tin user_id/seller_id từ request body.
+FE không polling HTTP để đọc live, sản phẩm, bình luận hay báo phí.
 
 ## Tài khoản
 
@@ -38,9 +35,10 @@ nếu dịch vụ email chưa cấu hình hoặc gửi thất bại.
 | GET | `/api/products` | Danh sách, phân trang và tìm kiếm | Không |
 | GET | `/api/products/:product_id` | Chi tiết sản phẩm | Không |
 | POST | `/api/products` | Tạo sản phẩm | Có |
+| POST | `/api/products/images` | Upload ảnh, multipart `file` | Có |
 | PATCH | `/api/products/:product_id` | Sửa thông tin sản phẩm | Có |
 | POST | `/api/products/:product_id/stock` | Điều chỉnh kho gốc | Có |
-| DELETE | `/api/products/:product_id` | Xóa sản phẩm chưa được sử dụng | Có |
+| DELETE | `/api/products/:product_id` | Xóa mềm sản phẩm | Có |
 
 Tạo sản phẩm:
 
@@ -50,7 +48,8 @@ Tạo sản phẩm:
   "price": 150000,
   "stock_quantity": 20,
   "image_url": "https://example.com/ao-thun.jpg",
-  "description": "Áo cotton"
+  "description": "Áo cotton",
+  "parcel": {"weight_grams":500,"length_cm":20,"width_cm":15,"height_cm":10}
 }
 ```
 
@@ -78,7 +77,7 @@ Response danh sách: `{ "data": [...], "total": 42, "page": 1, "page_size": 20 }
 Không có kết quả trả `data: []`, `total: 0`.
 
 PATCH chỉ nhận các trường cần sửa trong `name`, `price`, `image_url`,
-`description`. Giá 0 và chuỗi rỗng cho ảnh/mô tả được lưu đúng; không cho sửa
+`description`, `parcel`. Giá 0 và chuỗi rỗng cho ảnh/mô tả được lưu đúng; không cho sửa
 owner hoặc ghi đè kho qua PATCH. Body rỗng, nhiều JSON object liên tiếp, trường
 không hỗ trợ và request JSON quá 64 KB bị từ chối với 400.
 
@@ -91,9 +90,9 @@ không ghi đè nhau. `stock_quantity` chỉ là kho gốc còn tự do, không 
 đã chuyển sang live hay đã giữ cho đơn hàng.
 
 Chỉ chủ sản phẩm được sửa, điều chỉnh kho hoặc xóa (người khác nhận 403).
-Xóa thành công trả 204; sản phẩm đang gắn trong live hoặc đã được tham chiếu
-bởi bất kỳ OrderItem nào trả `409 product_in_use`, kể cả đơn đã hủy/hoàn, để
-giữ lịch sử. Không tự xóa dây chuyền các đơn/live. Sửa giá/thông tin sản phẩm
+Xóa mềm thành công trả 204 và ghi `products.deleted_at`. Sản phẩm bị ẩn khỏi
+catalog/live, GET và đặt mua mới trả 404. Không xóa dây chuyền đơn/live hay
+ảnh lịch sử. Đơn cũ vẫn đọc/hủy/hoàn được; trả tồn kho vào cả sản phẩm đã ẩn. Sửa giá/thông tin sản phẩm
 gốc không thay đổi giá đã chốt trong đơn hoặc snapshot sản phẩm đã gắn vào live.
 
 ## Đơn hàng
@@ -145,7 +144,7 @@ Các endpoint chi tiết thêm `items` với `product_id`, `name`, `image_url`,
 thanh toán chưa có. Người bán xem đơn offline qua `/api/sales/offline`.
 Người mua thực hiện các thao tác trên đơn qua `/api/orders`.
 
-Chỉ chủ đơn được thanh toán, hủy hoặc hoàn đơn. Các chuyển trạng thái:
+Người mua hủy đơn pending của mình; người bán xác nhận thanh toán/hoàn đơn của shop. Các chuyển trạng thái:
 
 - `pending → paid`: thanh toán.
 - `pending → cancelled`: hủy, trả lại tồn kho.
@@ -193,46 +192,20 @@ từ kho sản phẩm gốc sang phần kho dành riêng cho live, đồng thờ
 Xóa trả lại phần hàng chưa bán; bị chặn nếu còn đơn `pending` hoặc `paid` liên
 quan, để các đơn đó vẫn có thể hủy/hoàn đúng kho.
 
-Tạo/kết thúc live vẫn qua WebSocket với `type: "create_live"` (content là tiêu
-đề) và `type: "end_live"` (content là UUID live). Live mới lưu `ended_at = NULL`.
-`type: "join_live"` chỉ cho tham gia live có trạng thái `start`; live đã kết
-thúc hoặc không tồn tại trả `join_live_error`.
+Tạo/kết thúc live dùng `live.create`/`live.end`, theo REALTIME.md. Live mới lưu
+ended_at=NULL. `live.subscribe` đọc được snapshot của phiên đã kết thúc;
+gửi bình luận/đặt mua trên phiên đó vẫn bị chặn.
 
 Khi kết thúc live, kho chưa bán được trả về kho gốc trong cùng transaction.
-Hủy hoặc hoàn đơn sau đó trả hàng về kho gốc. Gửi lại `end_live` giữ nguyên
+Hủy hoặc hoàn đơn sau đó trả hàng về kho gốc. Gửi lại `live.end` giữ nguyên
 `ended_at` và không trả kho lần nữa. Với phiên đã kết thúc trước bản cập nhật,
-gửi lại `end_live` từ tài khoản chủ live để trả phần kho còn giữ.
+gửi lại `live.end` từ tài khoản chủ live để trả phần kho còn giữ.
 
 ## Bình luận trong live
 
-| Method | Route | Dữ liệu | JWT |
-| --- | --- | --- | --- |
-| GET | `/api/livestreams/:livestream_id/comments` | Query `after` tùy chọn | Có |
-| POST | `/api/livestreams/:livestream_id/comments` | `{"content":"Còn hàng không?"}` | Có |
-
-Bình luận được lưu theo từng phòng. Backend lấy tên người gửi từ tài khoản
-đã xác thực. Nội dung là văn bản từ 1 đến 300 ký tự sau khi bỏ khoảng trắng
-ở hai đầu. Khi phiên kết thúc, vẫn đọc được lịch sử và yêu cầu gửi mới trả `409`.
-
-Lần đọc đầu lấy tối đa 50 bình luận gần nhất theo thứ tự cũ đến mới. Response có
-`data`, `next_cursor` và `has_more`. Gửi `next_cursor` làm `after` để lấy các
-bình luận mới theo từng lượt. ID và cursor là chuỗi số. Frontend đọc phần mới
-mỗi 2,5 giây trong phiên đang mở.
-
-Bình luận được gửi và đọc **trực tiếp từ MongoDB** `livestream_app.chat_logs`,
-với `message_type: "livestream_comment"` và `livestream_id`. POST chỉ trả `201`
-sau khi MongoDB xác nhận lưu, kể cả khi chỉ gửi một tin. Mongo lỗi thì API báo
-lỗi; nội dung không được ghi sang SQL. Giới hạn 50 chỉ là kích thước trang đọc.
-
-SQL giữ tài khoản, quan hệ và trạng thái phiên live để kiểm tra quyền. Schema
-SQL mới không tạo bảng `livestream_comments`. Bộ đếm trong MongoDB
-`chat_counters` giữ ID/cursor dạng chuỗi số để FE tiếp tục dùng API hiện tại.
-
-Khi nâng cấp, dừng backend cũ trước rồi chạy bản mới: nếu bảng bình luận SQL cũ
-còn tồn tại, backend chuyển lịch sử sang MongoDB trước khi mở API. ID, tên,
-nội dung và thời gian được giữ lại; tiến độ chuyển nằm trong `chat_migrations`
-để có thể tiếp tục khi chạy lại. Bảng SQL cũ được giữ làm bản sao dữ liệu cũ,
-không được API dùng để đọc hoặc ghi bình luận sau khi chuyển xong.
+Dùng `comments.subscribe`/`comments.send` qua `/api/ws`; không có HTTP comments.
+MongoDB lưu nội dung, SQL giữ quan hệ/trạng thái live. Lịch sử/cursor, bảo vệ
+sender và reconnect được mô tả trong [REALTIME.md](REALTIME.md).
 
 ## Video qua LiveKit
 
@@ -247,7 +220,7 @@ lấy token phát camera/micro. Người xem chỉ được nhận media. Mỗi 
 identity riêng để nhiều tab có thể xem song song. Live đã kết thúc trả `409`,
 người phát sai quyền nhận `403`, cấu hình LiveKit bị thiếu trả `503`.
 
-Kết thúc phiên vẫn hỗ trợ lệnh WebSocket `end_live`. Cả hai đường đều cập nhật
+Kết thúc phiên vẫn hỗ trợ lệnh WebSocket `live.end`. Cả hai đường đều cập nhật
 trạng thái, trả kho và yêu cầu LiveKit ngắt phòng. `media_closed: false` cho
 biết phiên đã kết thúc trong Go nhưng LiveKit chưa xác nhận đóng phòng. Chủ
 phiên có thể gọi lại endpoint kết thúc. Trên bản LiveKit tự host, token cũ
@@ -304,96 +277,12 @@ gửi email thực. Không cần Redis/MongoDB cho suite API này. Khi không đ
 `TEST_MYSQL_DSN`, integration suite được skip.
 
 
-## Checkout: địa chỉ nhận và phí giao hàng
+## Checkout và báo phí GHN
 
-Cập nhật cả FE và backend. Shop cần lưu địa chỉ lấy hàng/phí trước khi nhận
-đơn mới. Phí do shop cấu hình theo nội tỉnh/liên tỉnh; ghim bản đồ chỉ hỗ trợ
-xác định vị trí, chưa phải báo giá tự động từ hãng vận chuyển.
-
-- GET/PUT `/api/sales/shipping-settings`: JWT của shop. GET trả
-  `{configured, settings}`. PUT nhận `pickup_address`, `same_province_fee`,
-  `other_province_fee`, `free_shipping_from` (null nếu không áp dụng).
-- POST `/api/orders/quote`: JWT người mua, nhận cùng thông tin sản phẩm,
-  số lượng, phương thức thanh toán và `delivery` như tạo đơn. Trả `unit_price`,
-  `items_subtotal`, `shipping_fee`, `total_amount`, `shipping_zone`,
-  `pickup_province`, `currency: VND`. Báo giá không giữ kho.
-- POST `/api/orders`: bắt buộc thông tin nhận hàng dưới đây; backend kiểm tra
-  lại giá, kho và phí. `expected_total` giúp trả 409 `checkout_changed` khi
-  tổng tiền đổi. `request_id` là UUID cho cùng một lần đặt, gửi lại sẽ trả
-  cùng đơn, không trừ kho hai lần. Dùng lại key với nội dung khác trả 409.
-- Chi tiết đơn của người mua/người bán có `delivery.recipient`,
-  `delivery.pickup`, `delivery.note`, `items_subtotal`, `shipping_fee`.
-  Địa chỉ và phí là bản chụp lúc đặt, không đổi theo cấu hình shop sau đó.
-  Đơn cũ thiếu dữ liệu có `delivery: null`, phí null; không tự điền phí 0.
-
-Ví dụ tạo đơn:
-
-```json
-{
-  "product_id": "<UUID sản phẩm>",
-  "quantity": 2,
-  "payment_method": "cod",
-  "delivery": {
-    "name": "Người nhận",
-    "phone": "0901234567",
-    "province_code": "1",
-    "ward": "Phường nơi nhận",
-    "address_line": "Số nhà, tên đường",
-    "latitude": 21.028511,
-    "longitude": 105.804817
-  },
-  "note": "Gọi trước khi giao",
-  "request_id": "<UUID của lần đặt>",
-  "expected_total": 250000
-}
-```
-
-`latitude`/`longitude` không bắt buộc nhưng phải có đủ cặp nếu gửi. Người dùng
-vẫn đặt được bằng địa chỉ nhập tay khi GPS/bản đồ lỗi. Tên tỉnh lấy từ mã
-tỉnh hợp lệ; mã/tên được chụp từ API v2 của provinces.open-api.vn ngày 17/11/2026
-trong `controller/services/provinces.json`. Tiền được tính bằng đơn vị nhỏ
-trong backend, không lấy giá/phí do client tự khai. `cod` và `bank_transfer`
-là lựa chọn FE; `manual` còn được nhận cho client cũ.
-
-Collection Postman và Test Studio đã có SHIP-001 để cấu hình phí 0 **cho tài
-khoản test** trước các case đơn cũ; payload đặt hàng đã có địa chỉ.
-
-## Danh sách live qua WebSocket
-
-Mở `ws://localhost:8080/api/livestreams/ws` (production HTTPS dùng `wss://`).
-Đây là kênh chỉ đọc, không cần JWT và không thay kết nối chat `/api/auth/ws`.
-Gửi message sau để nhận danh sách và đăng ký cập nhật cùng bộ lọc:
-
-```json
-{
-  "type": "list_lives",
-  "request_id": "catalog-1",
-  "query": {
-    "status": "start",
-    "sort": "newest",
-    "q": "",
-    "page": 1,
-    "page_size": 12
-  }
-}
-```
-
-Response có `type: "list_lives_success"`, cùng `request_id`, và các trường
-`data`, `total`, `page`, `page_size` giống REST. Mặc định `start`, `newest`,
-trang 1, 20 dòng; `page_size` từ 1–100. `query` còn nhận `seller_id`,
-`product_id` là UUID. `status` nhận `start/end/all`, `sort` nhận `newest/oldest`.
-Bộ lọc sai trả `list_lives_error` với `error: "invalid_query"` và không thay
-subscription hợp lệ trước đó. Request mới hợp lệ thay subscription cũ.
-
-Khi tạo/kết thúc live hoặc thêm/xóa sản phẩm khỏi live thành công, server đẩy
-lại snapshot theo bộ lọc hiện tại, kể cả kết thúc qua HTTP. Client không cần
-poll danh sách. Thông báo này được fan-out trong một tiến trình backend;
-nếu triển khai nhiều instance cần nối kênh thông báo liên tiến trình.
-
-Kết nối có ping/pong và giới hạn message 16 KiB. Khi mất kết nối, FE tự mở lại
-với backoff và gửi lại bộ lọc; không chuyển sang REST. FE dùng kênh này tại
-trang khám phá, danh sách chuyển phòng và danh sách live của người bán.
-API chi tiết phiên/sản phẩm, đơn hàng và media token vẫn giữ hợp đồng riêng.
+Xem [SHIPPING.md](SHIPPING.md) cho cấu hình GHN staging, dữ liệu kiện/khu vực,
+contract báo giá và giới hạn chỉ lấy phí. Checkout dùng địa chỉ đầy đủ và mã
+khu vực GHN; chủ live không đặt phí nội tỉnh/liên tỉnh. Backend chỉ gọi danh
+mục và API fee, không tạo vận đơn hay đặt lịch lấy hàng.
 
 ## Vị trí hiện tại và nơi lấy hàng của phiên live
 
@@ -436,43 +325,31 @@ kiểm tra/xác nhận. Sau khi lưu nơi lấy hàng mới, FE mới xin media 
 Có thể chuyển sang Nhập địa chỉ nếu không dùng GPS. Đây là vị trí tại thời
 điểm bắt đầu phát, không phải theo dõi vị trí liên tục.
 
-Checkout trong live dùng nơi lấy hàng của **phiên đó** và mức phí của shop;
+Checkout trong live dùng nơi lấy hàng của **phiên đó** để lấy báo phí hãng;
 đơn ngoài live vẫn dùng địa chỉ shop. Phiên cũ chưa có địa chỉ riêng dùng
 địa chỉ shop như trước. Cập nhật nơi phát không đổi địa chỉ shop hoặc snapshot
 đã lưu trong đơn cũ. Migration thêm `livestream_pickups` và location_mode vào
 các địa chỉ đã có; không cần tự xóa/tạo lại bảng.
 
-### Khắc phục shop có địa chỉ live nhưng thiếu phí ship
+### Báo phí và bưu cục
 
-`GET /api/livestreams/:id/pickup` trả thêm `shipping_configured` và
-`shipping_rates` (null nếu chưa có). `PUT` nhận thêm:
+Các danh mục GHN, tra bưu cục và quote dùng lệnh `shipping.*` trên `/api/ws`.
+Không có HTTP `/api/shipping/*`. Xem [SHIPPING.md](SHIPPING.md) và REALTIME.md.
+PUT pickup/HTTP quote cũ được giữ cho client tương thích; FE dùng WS.
 
-```json
-{
-  "pickup_address": { "name": "Shop", "phone": "0901234567", "province_code": "1", "ward": "Phường Ba Đình", "address_line": "12 Đường shop", "location_mode": "manual" },
-  "shipping_rates": {
-    "same_province_fee": 25000,
-    "other_province_fee": 40000,
-    "free_shipping_from": null
-  }
-}
-```
 
-Backend lưu địa chỉ phiên và mức phí trong cùng transaction. Shop chưa có
-cấu hình thì bắt buộc cả hai mức phí; thiếu trả 409 `shipping_not_configured`,
-phí sai/thiếu một mức trả 400 `invalid_shipping_settings`. Không tự gán phí 0.
-Khi tạo cấu hình lần đầu, địa chỉ đã xác nhận cũng là địa chỉ shop ban đầu.
-Shop đã có cấu hình thì việc cập nhật phí không đổi địa chỉ shop; các đơn cũ
-vẫn giữ snapshot. Client cũ có thể bỏ shipping_rates nếu shop đã cấu hình.
+## Upload ảnh sản phẩm và tạo ngay trong live
 
-FE đưa việc nhập phí vào bước bắt đầu phát. Chủ phiên cũng có thể sửa bằng
-Cài đặt giao hàng trong phòng mà không dừng video; người mua thử tính lại sau
-khi cấu hình được lưu.
+`POST /api/products/images`, Bearer JWT, Body → form-data: `file` loại File.
+Ảnh JPEG/PNG/WebP tối đa 10 MB; kiểm tra MIME nội dung, tên file do server tạo.
+Response 201: `{ "url": "/uploads/products/<uuid>.png" }`. Gán url vào
+`image_url` khi tạo/sửa sản phẩm. Upload này không thay avatar. FE cho chọn
+file/preview; không yêu cầu người dùng nhập URL. Cả GET/list/create/update
+sản phẩm đều trả `parcel` để chỉnh sửa thông tin kiện mà không nhập lại.
 
-`POST /api/orders/quote` chỉ cần khu vực nhận hàng, ví dụ
-`{"product_id":"<UUID>","quantity":1,"delivery":{"province_code":"1"}}`
-(kèm livestream_id khi mua live). payment_method có thể bỏ qua ở bước quote.
-Báo giá không yêu cầu tên/điện thoại/phường/đường, nên FE hiện phí sớm khi chọn
-tỉnh. `POST /api/orders` vẫn yêu cầu đủ thông tin nhận hàng và payment_method;
-việc nới dữ liệu quote không nới điều kiện tạo đơn. Nếu gửi location_mode=current
-vào quote thì tọa độ vẫn phải hợp lệ. Cập nhật backend cùng phiên bản FE này.
+Tạo sản phẩm mới ngay trong live qua WS `live.products.create` (REALTIME.md).
+Tạo catalog và cấp kho live trong cùng transaction; lỗi không để lại sản
+phẩm tạo dở. Picker dùng GET `/api/products?exclude_livestream_id=<UUID>` để
+loại sản phẩm đã gắn. Gỡ khỏi live ghi status=removed, trả kho, giữ allocation
+cho lịch sử; thêm lại tái sử dụng allocation. Đơn pending/paid vẫn chặn thao
+tác gỡ cho tới khi xử lý xong. Xóa mềm catalog ẩn khỏi bán nhưng giữ các đơn.

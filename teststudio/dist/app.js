@@ -201,6 +201,10 @@ $('start-button').addEventListener('click', async () => {
   if (active || !$('config-form').reportValidity()) return;
   if ($('seller-email').value.trim() === $('buyer-email').value.trim()) return toast('Seller và buyer cần là hai tài khoản test khác nhau.');
   const config = {base_url: $('base-url').value.trim(), account_mode: mode(), seller_email: $('seller-email').value.trim(), seller_password: $('seller-password').value, buyer_email: $('buyer-email').value.trim(), buyer_password: $('buyer-password').value};
+  for (const side of ['pickup', 'delivery']) for (const field of ['province_id', 'district_id', 'ward_code']) {
+    const key = `ghn_${side}_${field}`;
+    config[key] = $(key).value.trim() || (field.endsWith('_id') ? '0' : '');
+  }
   try { config.base_url = normalizeBackendUrl(config.base_url); } catch (error) { return toast(error.message); }
   if (!selectedFolders.size) return toast('Chọn ít nhất một nhóm test.');
   results = []; plan = []; activeKey = ''; active = true; startedAt = Date.now();

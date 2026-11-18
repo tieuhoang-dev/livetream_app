@@ -15,14 +15,20 @@ import (
 	"time"
 	"unicode"
 
+	"livesteam_app/config"
 	"livesteam_app/models"
 
 	"golang.org/x/text/unicode/norm"
 )
 
 type cachedLocation struct {
-	address models.DeliveryAddress
+	address geocodedLocation
 	expires time.Time
+}
+type geocodedLocation struct {
+	models.DeliveryAddress
+	provinceHints []string
+	districtHints []string
 }
 type reverseGeocoder struct {
 	client   *http.Client
@@ -38,12 +44,16 @@ var locationGeocoder = &reverseGeocoder{
 }
 
 func ReverseGeocode(ctx context.Context, latitude, longitude float64) (models.DeliveryAddress, error) {
-	return locationGeocoder.lookup(ctx, latitude, longitude)
+	location, err := locationGeocoder.lookup(ctx, latitude, longitude)
+	if err != nil {
+		return models.DeliveryAddress{}, err
+	}
+	return matchGeocodedArea(ctx, location), nil
 }
 
-func (g *reverseGeocoder) lookup(ctx context.Context, latitude, longitude float64) (models.DeliveryAddress, error) {
+func (g *reverseGeocoder) lookup(ctx context.Context, latitude, longitude float64) (geocodedLocation, error) {
 	if math.IsNaN(latitude) || math.IsInf(latitude, 0) || latitude < -90 || latitude > 90 || math.IsNaN(longitude) || math.IsInf(longitude, 0) || longitude < -180 || longitude > 180 {
-		return models.DeliveryAddress{}, errors.New("invalid_coordinates")
+		return geocodedLocation{}, errors.New("invalid_coordinates")
 	}
 	// One request per second to the public provider, with bounded in-memory
 	// caching. A canceled browser request must not wait behind the queue.
@@ -51,7 +61,7 @@ func (g *reverseGeocoder) lookup(ctx context.Context, latitude, longitude float6
 	case g.gate <- struct{}{}:
 		defer func() { <-g.gate }()
 	case <-ctx.Done():
-		return models.DeliveryAddress{}, ctx.Err()
+		return geocodedLocation{}, ctx.Err()
 	}
 	key := fmt.Sprintf("%.6f,%.6f", latitude, longitude)
 	if item, ok := g.cache[key]; ok && time.Now().Before(item.expires) {
@@ -65,7 +75,7 @@ func (g *reverseGeocoder) lookup(ctx context.Context, latitude, longitude float6
 		select {
 		case <-timer.C:
 		case <-ctx.Done():
-			return models.DeliveryAddress{}, ctx.Err()
+			return geocodedLocation{}, ctx.Err()
 		}
 	}
 	endpoint := g.endpoint
@@ -77,7 +87,7 @@ func (g *reverseGeocoder) lookup(ctx context.Context, latitude, longitude float6
 	}
 	u, err := url.Parse(endpoint)
 	if err != nil {
-		return models.DeliveryAddress{}, errors.New("geocoding_unavailable")
+		return geocodedLocation{}, errors.New("geocoding_unavailable")
 	}
 	query := u.Query()
 	query.Set("format", "jsonv2")
@@ -89,45 +99,113 @@ func (g *reverseGeocoder) lookup(ctx context.Context, latitude, longitude float6
 	u.RawQuery = query.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return models.DeliveryAddress{}, errors.New("geocoding_unavailable")
+		return geocodedLocation{}, errors.New("geocoding_unavailable")
 	}
 	req.Header.Set("User-Agent", "LiveMart/1.0 (+https://github.com/tieuhoang-dev/livetream_app)")
 	req.Header.Set("Accept", "application/json")
 	g.next = time.Now().Add(time.Second)
 	response, err := g.client.Do(req)
 	if err != nil {
-		return models.DeliveryAddress{}, errors.New("geocoding_unavailable")
+		return geocodedLocation{}, errors.New("geocoding_unavailable")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return models.DeliveryAddress{}, errors.New("geocoding_unavailable")
+		return geocodedLocation{}, errors.New("geocoding_unavailable")
 	}
 	var result struct {
 		DisplayName string            `json:"display_name"`
 		Address     map[string]string `json:"address"`
 	}
 	if err := json.NewDecoder(io.LimitReader(response.Body, 256<<10)).Decode(&result); err != nil {
-		return models.DeliveryAddress{}, errors.New("geocoding_unavailable")
+		return geocodedLocation{}, errors.New("geocoding_unavailable")
 	}
 	a := result.Address
 	code := reverseProvince(a["state"], a["province"], a["city"], a["region"])
 	if strings.ToLower(a["country_code"]) != "vn" || code == "" {
-		return models.DeliveryAddress{}, errors.New("location_not_supported")
+		return geocodedLocation{}, errors.New("location_not_supported")
 	}
 	street := strings.TrimSpace(a["house_number"] + " " + firstAddressPart(a["road"], a["pedestrian"], a["residential"]))
 	if street == "" {
 		street = result.DisplayName
 	}
-	address := models.DeliveryAddress{
+	address := geocodedLocation{DeliveryAddress: models.DeliveryAddress{
 		LocationMode: "current", ProvinceCode: code, ProvinceName: provinceNames[code],
 		Ward:        limitedAddress(firstAddressPart(a["quarter"], a["suburb"], a["village"], a["town"]), 100),
 		AddressLine: limitedAddress(street, 255), Latitude: &latitude, Longitude: &longitude,
-	}
+	}, provinceHints: []string{a["state"], a["province"], a["city"], a["region"]}, districtHints: []string{a["city_district"], a["county"], a["state_district"]}}
 	if len(g.cache) >= 256 {
 		clear(g.cache)
 	}
 	g.cache[key] = cachedLocation{address: address, expires: time.Now().Add(10 * time.Minute)}
 	return address, nil
+}
+
+func matchGeocodedArea(ctx context.Context, location geocodedLocation) models.DeliveryAddress {
+	address := location.DeliveryAddress
+	if firstAddressPart(location.districtHints...) == "" {
+		return address
+	}
+	provider, err := config.Shipping()
+	if err != nil {
+		return address
+	}
+	provinces, err := provider.Provinces(ctx)
+	if err != nil {
+		return address
+	}
+	var exact, aliases []int
+	for _, province := range provinces {
+		if reverseProvince(province.Name) != address.ProvinceCode {
+			continue
+		}
+		aliases = append(aliases, province.ID)
+		for _, hint := range location.provinceHints {
+			if provinceKey(hint) == provinceKey(province.Name) {
+				exact = append(exact, province.ID)
+				break
+			}
+		}
+	}
+	if len(exact) == 0 {
+		exact = aliases
+	}
+	if len(exact) != 1 {
+		return address
+	}
+	districts, err := provider.Districts(ctx, exact[0])
+	if err != nil {
+		return address
+	}
+	var matches []int
+	for _, district := range districts {
+		if district.SupportType < 1 || district.SupportType > 3 {
+			continue
+		}
+		for _, hint := range location.districtHints {
+			if hint != "" && areaKey(hint) == areaKey(district.Name) {
+				matches = append(matches, district.ID)
+				break
+			}
+		}
+	}
+	if len(matches) != 1 {
+		return address
+	}
+	address.CarrierProvinceID, address.CarrierDistrictID = exact[0], matches[0]
+	wards, err := provider.Wards(ctx, matches[0])
+	if err != nil {
+		return address
+	}
+	var codes []string
+	for _, ward := range wards {
+		if ward.SupportType >= 1 && ward.SupportType <= 3 && address.Ward != "" && areaKey(ward.Name) == areaKey(address.Ward) {
+			codes = append(codes, ward.Code)
+		}
+	}
+	if len(codes) == 1 {
+		address.CarrierWardCode = codes[0]
+	}
+	return address
 }
 
 func firstAddressPart(parts ...string) string {
